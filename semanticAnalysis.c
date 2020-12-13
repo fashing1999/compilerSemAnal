@@ -7,6 +7,10 @@
 // You only need to check for errors stated in the hw4 document. //
 int g_anyErrorOccur = 0;
 
+const char **typeNameStrings = {
+    'int', 'float', 'void', 'int *', 'float *', 'char *', 'unnamed', 'unnamed'
+};
+
 DATA_TYPE getBiggerType(DATA_TYPE dataType1, DATA_TYPE dataType2);
 void processProgramNode(AST_NODE *programNode);
 void processDeclarationNode(AST_NODE* declarationNode);
@@ -63,22 +67,104 @@ typedef enum ErrorMsgKind
     PASS_SCALAR_TO_ARRAY
 } ErrorMsgKind;
 
-void printErrorMsgSpecial(AST_NODE* node1, char* name2, ErrorMsgKind errorMsgKind) // [Msg] 完全還沒填
+void printErrorMsgSpecial(AST_NODE* node1, DATA_TYPE type2, ErrorMsgKind errorMsgKind) // [Msg] 應該沒錯吧
 {
     g_anyErrorOccur = 1;
     printf("Error found in line %d\n", node1->linenumber);
     switch(errorMsgKind){
+        case PASS_ARRAY_TO_SCALAR: // [Ass] 3.c)
+        case PASS_SCALAR_TO_ARRAY:
+            printf("invalid conversion from \'%s\' to \'%s\'.\n", typeNameStrings[node1->dataType], typeNameStrings[type2]);
+            break;
         default:
-            printf("[DEBUG] Unhandled case in printErrorMsg()\n");
+            printf("[DEBUG] Unhandled case in printErrorMsgSpecial()\n");
             break;
     }
 }
 
-void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) // [Msg] 完全還沒填
+void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) // [Msg] del(n) := "如果不用留的話，有n個地方要刪掉"
 {
     g_anyErrorOccur = 1;
     printf("Error found in line %d\n", node->linenumber);
+    char* name = node->semantic_value.identifierSemanticValue.identifierName;
     switch(errorMsgKind){
+        case SYMBOL_IS_NOT_TYPE: // [Msg] 補足reserved word當成id的部分，例：a a = 5;。但是好像不可能會有，可能可以刪掉
+            printf("ID \'%s\' is not a type name.\n",
+                node->semantic_value.identifierSemanticValue.identifierName);
+            break;
+        case SYMBOL_REDECLARE: //[Ass] 1.b)
+            printf("redeclaration of \'%s %s\'.\n", typeNameStrings[node->dataType], name);
+            break;
+        case SYMBOL_UNDECLARED: //[Ass] 1.a)
+            printf("\'%s\' was not declared in this scope.\n", name);
+            break;
+        case NOT_FUNCTION_NAME: //[Ass] Extra 2
+            printf("called object \'%s\' is not a function or function pointer.\n", name);
+            break;
+        case TRY_TO_INIT_ARRAY: // [Msg] del(1), reference: [Msg] 不行喔?
+            printf("Cannot initialize array \'%s\'.\n",
+                node->semantic_value.identifierSemanticValue.identifierName);
+            break;
+        case EXCESSIVE_ARRAY_DIM_DECLARATION: // [Msg] del(2)
+            printf("ID \'%s\' array dimension cannot be greater than %d\n",
+                node->semantic_value.identifierSemanticValue.identifierName,
+                MAX_ARRAY_DIMENSION);
+            break;
+        case RETURN_ARRAY: // [Msg] del(1)
+            printf("Function \'%s\' cannot return array.\n",
+                node->rightSibling->semantic_value.identifierSemanticValue.identifierName);
+            break;
+        case VOID_VARIABLE: // [Msg] del(1)
+            printf("Type \'%s\' cannot be a variable's type.\n",
+                node->semantic_value.identifierSemanticValue.identifierName);
+            break;
+        case TYPEDEF_VOID_ARRAY: // [Msg] del(1)
+            printf("Declaration of \'%s\' as array of voids.\n",
+                node->semantic_value.identifierSemanticValue.identifierName);
+            break;
+        case PARAMETER_TYPE_UNMATCH: // [Msg] del(2)
+            printf("Parameter is incompatible with parameter type.\n");
+            break;
+        case TOO_FEW_ARGUMENTS: //[Ass] 2.a)
+            printf("too few arguments to function \'%s\'.\n", name);
+            break;
+        case TOO_MANY_ARGUMENTS: //[Ass] 2.a)
+            printf("too many arguments to function \'%s\'.\n", name);
+            break;
+        case RETURN_TYPE_UNMATCH: // [Ass] 2.b) [Msg] 但是gcc好像允許這個功能!!?
+            printf("no warning generated.\n");
+            break;
+        case INCOMPATIBLE_ARRAY_DIMENSION: // [Msg] del(7)
+            printf("Incompatible array dimensions.\n");
+            break;
+        case NOT_ASSIGNABLE: // [Msg] del(0), 沒呼叫過
+            printf("ID \'%s\' is not assignable.\n",
+                node->semantic_value.identifierSemanticValue.identifierName);
+            break;
+        case NOT_ARRAY: // [Msg] del(2), 好像是正常不會發生的情況
+            printf("[DEBUG] ID \'%s\' is not array.\n",
+                node->semantic_value.identifierSemanticValue.identifierName);
+            break;
+        case IS_TYPE_NOT_VARIABLE: // [Msg] del(2)
+            printf("ID \'%s\' is a type, not a variable's name.\n",
+                node->semantic_value.identifierSemanticValue.identifierName);
+            break;
+        case IS_FUNCTION_NOT_VARIABLE: // [Msg] del(1)
+            printf("ID \'%s\' is a function, not a variable's name.\n",
+                node->semantic_value.identifierSemanticValue.identifierName);
+            break;
+        case STRING_OPERATION: // [Msg] del(3)
+            printf("String operation is unsupported.\n");
+            break;
+        case ARRAY_SIZE_NOT_INT: // [Ass] 3.b)
+            printf("array subscript is not an integer\n");
+            break;
+        case ARRAY_SIZE_NEGATIVE: //[Ass] Extra 1
+            printf("size of array \'%s\' is negative.\n",name);
+            break;
+        case ARRAY_SUBSCRIPT_NOT_INT: //[Ass] 3.b)
+            printf("array subscript is not an integer.\n");
+            break;
         default:
             printf("[DEBUG] Unhandled case in printErrorMsg()\n");
             break;
@@ -214,7 +300,7 @@ void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTy
                         int typeArrayDimension = typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
                         int idArrayDimension = newAttribute->attr.typeDescriptor->properties.arrayProperties.dimension;
                         if((typeArrayDimension + idArrayDimension) > MAX_ARRAY_DIMENSION){
-                            printErrorMsg(IDNode, EXCESSIVE_ARRAY_DIM_DECLARATION); // [Ass] 3.a)
+                            printErrorMsg(IDNode, EXCESSIVE_ARRAY_DIM_DECLARATION);
                             free(newAttribute->attr.typeDescriptor);
                             IDNode->dataType = ERROR_TYPE;
                             declarationNode->dataType = ERROR_TYPE;
@@ -537,12 +623,12 @@ void checkParameterPassing(Parameter* formalParameter, AST_NODE* actualParameter
 {    
     if(formalParameter->type->kind == SCALAR_TYPE_DESCRIPTOR && 
         (actualParameter->dataType == INT_PTR_TYPE || actualParameter->dataType == FLOAT_PTR_TYPE)){
-        printErrorMsgSpecial(actualParameter, formalParameter->parameterName, PASS_ARRAY_TO_SCALAR);
+        printErrorMsgSpecial(actualParameter, formalParameter->type->properties.dataType, PASS_ARRAY_TO_SCALAR);
         actualParameter->dataType = ERROR_TYPE;
     }
     else if(formalParameter->type->kind == ARRAY_TYPE_DESCRIPTOR && 
         !(actualParameter->dataType == INT_PTR_TYPE || actualParameter->dataType == FLOAT_PTR_TYPE)){
-        printErrorMsgSpecial(actualParameter, formalParameter->parameterName, PASS_SCALAR_TO_ARRAY);
+        printErrorMsgSpecial(actualParameter, formalParameter->type->properties.dataType, PASS_SCALAR_TO_ARRAY);
         actualParameter->dataType = ERROR_TYPE;
     }
     else if(actualParameter->dataType == CONST_STRING_TYPE){
