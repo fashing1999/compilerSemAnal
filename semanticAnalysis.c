@@ -105,26 +105,6 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) // [Msg] del(n) :=
             printf("Cannot initialize array \'%s\'.\n",
                 node->semantic_value.identifierSemanticValue.identifierName);
             break;
-        case EXCESSIVE_ARRAY_DIM_DECLARATION: // [Msg] del(2)
-            printf("ID \'%s\' array dimension cannot be greater than %d\n",
-                node->semantic_value.identifierSemanticValue.identifierName,
-                MAX_ARRAY_DIMENSION);
-            break;
-        case RETURN_ARRAY: // [Msg] del(1)
-            printf("Function \'%s\' cannot return array.\n",
-                node->rightSibling->semantic_value.identifierSemanticValue.identifierName);
-            break;
-        case VOID_VARIABLE: // [Msg] del(1)
-            printf("Type \'%s\' cannot be a variable's type.\n",
-                node->semantic_value.identifierSemanticValue.identifierName);
-            break;
-        case TYPEDEF_VOID_ARRAY: // [Msg] del(1)
-            printf("Declaration of \'%s\' as array of voids.\n",
-                node->semantic_value.identifierSemanticValue.identifierName);
-            break;
-        case PARAMETER_TYPE_UNMATCH: // [Msg] del(2)
-            printf("Parameter is incompatible with parameter type.\n");
-            break;
         case TOO_FEW_ARGUMENTS: //[Ass] 2.a)
             printf("too few arguments to function \'%s\'.\n", name);
             break;
@@ -134,27 +114,9 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) // [Msg] del(n) :=
         case RETURN_TYPE_UNMATCH: // [Ass] 2.b) [Msg] 但是gcc好像允許這個功能!!?
             printf("no warning generated.\n");
             break;
-        case INCOMPATIBLE_ARRAY_DIMENSION: // [Msg] del(7)
-            printf("Incompatible array dimensions.\n");
-            break;
-        case NOT_ASSIGNABLE: // [Msg] del(0), 沒呼叫過
-            printf("ID \'%s\' is not assignable.\n",
-                node->semantic_value.identifierSemanticValue.identifierName);
-            break;
-        case NOT_ARRAY: // [Msg] del(2), 好像是正常不會發生的情況
+        case NOT_ARRAY: // [Ass] 3.c), 不太確定
             printf("[DEBUG] ID \'%s\' is not array.\n",
                 node->semantic_value.identifierSemanticValue.identifierName);
-            break;
-        case IS_TYPE_NOT_VARIABLE: // [Msg] del(2)
-            printf("ID \'%s\' is a type, not a variable's name.\n",
-                node->semantic_value.identifierSemanticValue.identifierName);
-            break;
-        case IS_FUNCTION_NOT_VARIABLE: // [Msg] del(1)
-            printf("ID \'%s\' is a function, not a variable's name.\n",
-                node->semantic_value.identifierSemanticValue.identifierName);
-            break;
-        case STRING_OPERATION: // [Msg] del(3)
-            printf("String operation is unsupported.\n");
             break;
         case ARRAY_SIZE_NOT_INT: // [Ass] 3.b)
             printf("array subscript is not an integer\n");
@@ -254,14 +216,6 @@ void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTy
 {
     AST_NODE* typeNode = declarationNode->child;
     TypeDescriptor *typeDescriptorOfTypeNode = typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
-    if((isVariableOrTypeAttribute == VARIABLE_ATTRIBUTE) && 
-       (typeDescriptorOfTypeNode->kind == SCALAR_TYPE_DESCRIPTOR) &&
-       (typeDescriptorOfTypeNode->properties.dataType == VOID_TYPE)){
-        printErrorMsg(typeNode, VOID_VARIABLE);
-        typeNode->dataType = ERROR_TYPE;
-        return;
-    }
-
     AST_NODE* IDNode = typeNode->rightSibling;
     while(IDNode){
         if(declaredLocally(IDNode->semantic_value.identifierSemanticValue.identifierName)){
@@ -277,15 +231,6 @@ void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTy
                     newAttribute->attr.typeDescriptor = typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
                     break;
                 case ARRAY_ID:
-                    if((isVariableOrTypeAttribute == TYPE_ATTRIBUTE) && 
-                    (typeDescriptorOfTypeNode->kind == SCALAR_TYPE_DESCRIPTOR) &&
-                    (typeDescriptorOfTypeNode->properties.dataType == VOID_TYPE)){
-                        printErrorMsg(IDNode, TYPEDEF_VOID_ARRAY);
-                        IDNode->dataType = ERROR_TYPE;
-                        declarationNode->dataType = ERROR_TYPE;
-                        break;
-                    }
-
                     newAttribute->attr.typeDescriptor = (TypeDescriptor*)malloc(sizeof(TypeDescriptor));
                     processDeclDimList(IDNode, newAttribute->attr.typeDescriptor, ignoreArrayFirstDimSize);
                     if(IDNode->dataType == ERROR_TYPE){
@@ -299,21 +244,13 @@ void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTy
                     else if(typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR){
                         int typeArrayDimension = typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
                         int idArrayDimension = newAttribute->attr.typeDescriptor->properties.arrayProperties.dimension;
-                        if((typeArrayDimension + idArrayDimension) > MAX_ARRAY_DIMENSION){
-                            printErrorMsg(IDNode, EXCESSIVE_ARRAY_DIM_DECLARATION);
-                            free(newAttribute->attr.typeDescriptor);
-                            IDNode->dataType = ERROR_TYPE;
-                            declarationNode->dataType = ERROR_TYPE;
-                        }
-                        else{
-                            newAttribute->attr.typeDescriptor->properties.arrayProperties.elementType = 
-                                typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->properties.arrayProperties.elementType;
-                            newAttribute->attr.typeDescriptor->properties.arrayProperties.dimension = 
-                                typeArrayDimension + idArrayDimension;
-                            for(int indexType = 0, indexId = idArrayDimension; indexId < idArrayDimension + typeArrayDimension; ++indexType, ++indexId){
-                                newAttribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension[indexId] = 
-                                    typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension[indexType];
-                            }
+                        newAttribute->attr.typeDescriptor->properties.arrayProperties.elementType = \
+                            typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->properties.arrayProperties.elementType;
+                        newAttribute->attr.typeDescriptor->properties.arrayProperties.dimension = \
+                            typeArrayDimension + idArrayDimension;
+                        for(int indexType = 0, indexId = idArrayDimension; indexId < idArrayDimension + typeArrayDimension; ++indexType, ++indexId){
+                            newAttribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension[indexId] = 
+                                typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension[indexType];  
                         }
                     }
                     break;
@@ -345,18 +282,11 @@ void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTy
     }
 }
 
-void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 卡住了
+void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住了
 {
     AST_NODE* returnTypeNode = declarationNode->child;
 
     int errorOccur = 0;
-    if(returnTypeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR)
-    {
-        printErrorMsg(returnTypeNode, RETURN_ARRAY);
-        returnTypeNode->dataType = ERROR_TYPE;
-        errorOccur = 1;
-    }
-
     AST_NODE* functionNameID = returnTypeNode->rightSibling;
     if(declaredLocally(functionNameID->semantic_value.identifierSemanticValue.identifierName))
     {
@@ -516,16 +446,7 @@ void checkAssignmentStmt(AST_NODE* assignmentNode)
     if(opL->dataType == ERROR_TYPE || opR->dataType == ERROR_TYPE)
         assignmentNode->dataType = ERROR_TYPE;
     
-    if(opR->dataType == INT_PTR_TYPE || opR->dataType == FLOAT_PTR_TYPE){ // [Msg] 這邊不能是else if
-        printErrorMsg(opR, INCOMPATIBLE_ARRAY_DIMENSION);
-        assignmentNode->dataType = ERROR_TYPE;
-    }
-    else if(opR->dataType == CONST_STRING_TYPE){
-        printErrorMsg(opR, STRING_OPERATION);
-        assignmentNode->dataType = ERROR_TYPE;
-    }
-    else
-        assignmentNode->dataType = getBiggerType(opL->dataType, opR->dataType);
+    assignmentNode->dataType = getBiggerType(opL->dataType, opR->dataType);
 }
 
 void checkWriteFunction(AST_NODE* functionCallNode) // [Inf] just for write()
@@ -540,12 +461,6 @@ void checkWriteFunction(AST_NODE* functionCallNode) // [Inf] just for write()
         paraCount++;
         if(paraPtr->dataType == ERROR_TYPE)
             functionCallNode->dataType = ERROR_TYPE;
-        else if(paraPtr->dataType != INT_TYPE &&
-                paraPtr->dataType != FLOAT_TYPE &&
-                paraPtr->dataType != CONST_STRING_TYPE){
-            printErrorMsg(paraPtr, PARAMETER_TYPE_UNMATCH);
-            functionCallNode->dataType = ERROR_TYPE;
-        }
         paraPtr = paraPtr->rightSibling;
     }
     
@@ -784,19 +699,6 @@ void processExprNode(AST_NODE* exprNode)
         AST_NODE* opL = exprNode->child, *opR = opL->rightSibling;
         processExprRelatedNode(opL);
         processExprRelatedNode(opR);
-        
-        if(opL->dataType == INT_PTR_TYPE || opL->dataType == FLOAT_PTR_TYPE){
-            printErrorMsg(opL, INCOMPATIBLE_ARRAY_DIMENSION);
-            exprNode->dataType = ERROR_TYPE;
-        }
-        if(opR->dataType == INT_PTR_TYPE || opR->dataType == FLOAT_PTR_TYPE){
-            printErrorMsg(opL, INCOMPATIBLE_ARRAY_DIMENSION);
-            exprNode->dataType = ERROR_TYPE;
-        }
-        if(opL->dataType == CONST_STRING_TYPE || opR->dataType == CONST_STRING_TYPE){
-            printErrorMsg(exprNode, STRING_OPERATION);
-            exprNode->dataType = ERROR_TYPE;
-        }
         if(opL->dataType == ERROR_TYPE || opR->dataType == ERROR_TYPE)
             exprNode->dataType = ERROR_TYPE;
         
@@ -813,19 +715,11 @@ void processExprNode(AST_NODE* exprNode)
     else{ // [Inf] unary op
         AST_NODE* operand = exprNode->child;
         processExprRelatedNode(operand);
-        if(operand->dataType == INT_PTR_TYPE || operand->dataType == FLOAT_PTR_TYPE){
-            printErrorMsg(operand, INCOMPATIBLE_ARRAY_DIMENSION);
-            exprNode->dataType = ERROR_TYPE;
-        }
-        else if(operand->dataType == CONST_STRING_TYPE){
-            printErrorMsg(exprNode, STRING_OPERATION);
-            exprNode->dataType = ERROR_TYPE;
-        }
-        else if(operand->dataType == ERROR_TYPE)
+        
+        if(operand->dataType == ERROR_TYPE)
             exprNode->dataType = ERROR_TYPE;
         else
             exprNode->dataType = operand->dataType;
-
         
         if((exprNode->dataType != ERROR_TYPE) &&
            (operand->nodeType == CONST_VALUE_NODE || (operand->nodeType == EXPR_NODE && operand->semantic_value.exprSemanticValue.isConstEval))){
@@ -863,27 +757,10 @@ void processVariableLValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高
         return;
     }
     idNode->semantic_value.identifierSemanticValue.symbolTableEntry = entry;
-
-    if(entry->attribute->attributeKind == TYPE_ATTRIBUTE){
-        printErrorMsg(idNode, IS_TYPE_NOT_VARIABLE);
-        idNode->dataType = ERROR_TYPE;
-        return;
-    }
-    else if(entry->attribute->attributeKind == FUNCTION_SIGNATURE){
-        printErrorMsg(idNode, IS_FUNCTION_NOT_VARIABLE);
-        idNode->dataType = ERROR_TYPE;
-        return;
-    }
-    
-    TypeDescriptor *typeDescriptor = idNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
-        
+   
+    TypeDescriptor *typeDescriptor = idNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;        
     if(idNode->semantic_value.identifierSemanticValue.kind == NORMAL_ID){
-        if(typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR){
-            printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION);
-            idNode->dataType = ERROR_TYPE;
-        }
-        else
-            idNode->dataType = typeDescriptor->properties.dataType;
+        idNode->dataType = typeDescriptor->properties.dataType;
     }
     else if(idNode->semantic_value.identifierSemanticValue.kind == ARRAY_ID){
         int dimension = 0;
@@ -903,14 +780,8 @@ void processVariableLValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高
             printErrorMsg(idNode, NOT_ARRAY);
             idNode->dataType = ERROR_TYPE;
         }
-        else{
-            if(dimension == typeDescriptor->properties.arrayProperties.dimension)
-                idNode->dataType = typeDescriptor->properties.arrayProperties.elementType;
-            else{
-                printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION);
-                idNode->dataType = ERROR_TYPE;
-            }
-        }
+        else
+            idNode->dataType = typeDescriptor->properties.arrayProperties.elementType;
     }
 }
 
@@ -921,11 +792,6 @@ void processVariableRValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高
     idNode->semantic_value.identifierSemanticValue.symbolTableEntry = entry;
     if(!entry){
         printErrorMsg(idNode, SYMBOL_UNDECLARED);
-        idNode->dataType = ERROR_TYPE;
-        return;
-    }
-    if(entry->attribute->attributeKind == TYPE_ATTRIBUTE){
-        printErrorMsg(idNode, IS_TYPE_NOT_VARIABLE);
         idNode->dataType = ERROR_TYPE;
         return;
     }
@@ -963,10 +829,6 @@ void processVariableRValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高
             if(idNode->dataType != ERROR_TYPE){
                 if(dimension == typeDescriptor->properties.arrayProperties.dimension)
                     idNode->dataType = typeDescriptor->properties.arrayProperties.elementType;
-                else if(dimension > typeDescriptor->properties.arrayProperties.dimension){
-                    printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION);
-                    idNode->dataType = ERROR_TYPE;
-                }
                 else if(typeDescriptor->properties.arrayProperties.elementType == INT_TYPE)
                     idNode->dataType = INT_PTR_TYPE;
                 else
@@ -1078,12 +940,6 @@ void processDeclDimList(AST_NODE* idNode, TypeDescriptor* typeDescriptor, int ig
         dimPtr = dimPtr->rightSibling;
     }
     while(dimPtr){
-        if(dimension >= MAX_ARRAY_DIMENSION){
-            printErrorMsg(dimList->parent, EXCESSIVE_ARRAY_DIM_DECLARATION);
-            idNode->dataType = ERROR_TYPE;
-            break;
-        }
-
         processExprRelatedNode(dimPtr);
         if(dimPtr->dataType == ERROR_TYPE)
             idNode->dataType = ERROR_TYPE;
