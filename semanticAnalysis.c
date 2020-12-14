@@ -344,26 +344,20 @@ void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住�
     functionAttribute->attr.functionSignature->parameterList = NULL;
 
     if(!errorFlag) // [msg] removed "symbol table entry inserted" flag
-    {
         enterSymbol(functionNameID->semantic_value.identifierSemanticValue.identifierName, functionAttribute);
-    }
-
+    
     openScope();
 
     AST_NODE *parameterListNode = functionNameID->rightSibling;
     AST_NODE *curParameterNode = parameterListNode->child;
     int parametersCount = 0;
-    if(curParameterNode)
-    {
+    if(curParameterNode){
         parametersCount++;
         processDeclarationNode(curParameterNode);
         AST_NODE *parameterID = curParameterNode->child->rightSibling;
         if(curParameterNode->dataType == ERROR_TYPE)
-        {
             errorFlag = 1;
-        }
-        else if(!errorFlag)
-        {
+        else if(!errorFlag){
             Parameter *parameter = (Parameter*)malloc(sizeof(Parameter));
             parameter->next = NULL;
             parameter->parameterName = parameterID->semantic_value.identifierSemanticValue.identifierName;
@@ -375,17 +369,13 @@ void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住�
 
     Parameter *prevParameterPtr = functionAttribute->attr.functionSignature->parameterList;
     
-    while(curParameterNode)
-    {
+    while(curParameterNode){
         parametersCount++;
         processDeclarationNode(curParameterNode);
         AST_NODE *parameterID = curParameterNode->child->rightSibling;
         if(curParameterNode->dataType == ERROR_TYPE)
-        {
             errorFlag = 1;
-        }
-        else if(!errorFlag)
-        {
+        else if(!errorFlag){
             Parameter *parameter = (Parameter*)malloc(sizeof(Parameter));
             parameter->next = NULL;
             parameter->parameterName = parameterID->semantic_value.identifierSemanticValue.identifierName;
@@ -397,12 +387,10 @@ void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住�
     }
     functionAttribute->attr.functionSignature->parametersCount = parametersCount;
 
-    if (errorFlag) // [msg] deleted condition: && (functionAttribute != NULL)
-    {
+    if (errorFlag){ // [msg] deleted condition: && (functionAttribute != NULL)
         Parameter* curParameterPtr = functionAttribute->attr.functionSignature->parameterList;
         Parameter* nextParameterPtr = NULL; 
-        while(curParameterPtr)
-        {
+        while(curParameterPtr){
             nextParameterPtr = curParameterPtr->next;
             free(curParameterPtr);
             curParameterPtr = nextParameterPtr;
@@ -414,15 +402,36 @@ void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住�
         removeSymbol(functionNameID->semantic_value.identifierSemanticValue.identifierName);
         declarationNode->dataType = ERROR_TYPE;
     } 
-    else 
-    { // [inf] process function contents
+    else{ // [inf] process function contents
         AST_NODE *blockNode = parameterListNode->rightSibling;
         AST_NODE *curBlockContent = blockNode->child;
-        while(curBlockContent)
-        {
+        int checkReturn = 0; //0 for no return; 1 for having something returned
+        while(curBlockContent){
             processGeneralNode(curBlockContent, 0);
+            if(curBlockContent->child->semantic_value.stmtSemanticValue.kind == RETURN_STMT){
+                checkReturn = 1;
+                AST_NODE *tmp = curBlockContent->child->child;
+                while(tmp)
+                {
+                    printf("%d ", tmp->semantic_value.stmtSemanticValue.kind);
+                    tmp = tmp->rightSibling;
+                }
+                printf("\n");
+                // if(curBlockContent->dataType != returnTypeNode->dataType){
+                //     printf("Warnig found in line %d\n", curBlockContent->linenumber);
+                //     if(returnTypeNode->dataType == VOID_TYPE)
+                //         printf("\'return\' with a value, in function returning void\n\n");
+                //     else
+                //         printf("return makes \'%s\' from [%d] without a casting\n\n", 
+                //         typeNameString(returnTypeNode->dataType), curBlockContent->child->child->child->rightSibling->dataType);
+                // }
+            }
+            
             curBlockContent = curBlockContent->rightSibling;
         }
+        // if(!checkReturn && returnTypeNode->dataType != VOID_TYPE){
+        //     //[Msg]好像連warning都不是
+        // }
     }
 
     closeScope();

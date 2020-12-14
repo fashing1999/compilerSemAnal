@@ -3,6 +3,9 @@ float b;
 
 typedef int goodgood[5][5];
 
+void testtt(){
+    return 1;
+}
 int plusOnes(int a[10]){
     return a[5]+1;
 }
