@@ -241,6 +241,9 @@ void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTy
                     newAttribute->attr.typeDescriptor = typeNodeTypeDescr;
                     break;
                 case ARRAY_ID:
+                    printf("[declaring array] %s (line #%d).\n", 
+                        IDNode->semantic_value.identifierSemanticValue.identifierName, IDNode->linenumber
+                    );
                     newAttribute->attr.typeDescriptor = (TypeDescriptor*)malloc(sizeof(TypeDescriptor));
                     ArrayProperties newArrayIDProperties = newAttribute->attr.typeDescriptor->properties.arrayProperties;
                     processDeclDimList(IDNode, newAttribute->attr.typeDescriptor, ignoreArrayFirstDimSize);
@@ -301,8 +304,7 @@ void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住�
     AST_NODE* functionNameID = returnTypeNode->rightSibling;
     int errorFlag = 0;
     
-    if(declaredLocally(functionNameID->semantic_value.identifierSemanticValue.identifierName))
-    {
+    if(declaredLocally(functionNameID->semantic_value.identifierSemanticValue.identifierName)) {
         printErrorMsg(functionNameID, SYMBOL_REDECLARE);
         functionNameID->dataType = ERROR_TYPE;
         errorFlag = 1;
@@ -800,6 +802,7 @@ void processExprRelatedNode(AST_NODE* exprRelatedNode)
 void processVariableLValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高 // [msg] 我大改過 加了 3.a)
 {
     IdentifierSemanticValue IDSemanticValue = idNode->semantic_value.identifierSemanticValue;
+    // printf("%s\n", idNode->semantic_value.identifierSemanticValue.identifierName);
     SymbolTableEntry *entry = retrieveSymbol(IDSemanticValue.identifierName);
     if(!entry){
         printErrorMsg(idNode, SYMBOL_UNDECLARED); // [Ass] 1.a)
@@ -831,7 +834,10 @@ void processVariableLValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高 /
             dimPtr = dimPtr->rightSibling;
         }
         // [Ass/Msg] implement checkpoint 3.a) here
+        printf("[symbol] %s: ", idNode->semantic_value.identifierSemanticValue.identifierName);
         int correctDims = entry->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
+        printf("formal_dim = %d, ", correctDims);
+        printf("received_dim = %d\n", dimension);
         if (dimension < correctDims) {
             printErrorMsg(idNode, NOT_ASSIGNABLE); // [Ass] 3.a)
             idNode->dataType = ERROR_TYPE;
