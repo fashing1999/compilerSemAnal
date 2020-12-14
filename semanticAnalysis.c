@@ -7,9 +7,7 @@
 // You only need to check for errors stated in the hw4 document. //
 int g_anyErrorOccur = 0;
 
-const char **typeNameStrings = {
-    'int', 'float', 'void', 'int *', 'float *', 'char *', 'unnamed', 'unnamed'
-};
+extern char **typeNameStrings;
 
 DATA_TYPE getBiggerType(DATA_TYPE dataType1, DATA_TYPE dataType2);
 void processProgramNode(AST_NODE *programNode);
@@ -27,6 +25,7 @@ void checkForStmt(AST_NODE* forNode);
 void checkAssignmentStmt(AST_NODE* assignmentNode);
 void checkIfStmt(AST_NODE* ifNode);
 void checkWriteFunction(AST_NODE* functionCallNode);
+void checkReadFunction(AST_NODE* functionCallNode);
 void checkFunctionCall(AST_NODE* functionCallNode);
 void processExprRelatedNode(AST_NODE* exprRelatedNode);
 void checkParameterPassing(Parameter* formalParameter, AST_NODE* actualParameter);
@@ -55,6 +54,7 @@ typedef enum ErrorMsgKind
     TOO_MANY_ARGUMENTS,
     RETURN_TYPE_UNMATCH,
     INCOMPATIBLE_ARRAY_DIMENSION,
+    INCOMPATIBLE_ARRAY_DIMENSION_TOO_FEW,
     NOT_ASSIGNABLE,
     NOT_ARRAY,
     IS_TYPE_NOT_VARIABLE,
@@ -127,6 +127,15 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) // [Msg] del(n) :=
         case ARRAY_SUBSCRIPT_NOT_INT: //[Ass] 3.b)
             printf("array subscript is not an integer.\n");
             break;
+        case INCOMPATIBLE_ARRAY_DIMENSION_TOO_FEW: //[Ass] 3.a)
+            printf("pointer references shouldn't appear in expressions.\n");
+            break;
+        case INCOMPATIBLE_ARRAY_DIMENSION: //[Ass] 3.a)
+            printf("subscripted value is neither array nor pointer nor vector\n");
+            break;
+        case NOT_ASSIGNABLE: //[Ass] 3.a)
+            printf("assignment to expression with array type");
+            break;
         default:
             printf("[DEBUG] Unhandled case in printErrorMsg()\n");
             break;
@@ -198,15 +207,16 @@ void processTypeNode(AST_NODE* idNodeAsType)
         printErrorMsg(idNodeAsType, SYMBOL_IS_NOT_TYPE); // [Inf] for example: i i = 5; 
         idNodeAsType->dataType = ERROR_TYPE;
     }
-    else{
+    else {
         idNodeAsType->semantic_value.identifierSemanticValue.symbolTableEntry = entry;
+        TypeDescriptor *idNodeTypeDescr = entry->attribute->attr.typeDescriptor;
         
-        switch(entry->attribute->attr.typeDescriptor->kind){
+        switch(idNodeTypeDescr->kind){
             case SCALAR_TYPE_DESCRIPTOR:
-                idNodeAsType->dataType = entry->attribute->attr.typeDescriptor->properties.dataType;
+                idNodeAsType->dataType = idNodeTypeDescr->properties.dataType;
                 break;
             case ARRAY_TYPE_DESCRIPTOR:
-                idNodeAsType->dataType = entry->attribute->attr.typeDescriptor->properties.arrayProperties.elementType;
+                idNodeAsType->dataType = idNodeTypeDescr->properties.arrayProperties.elementType;
                 break;
         }
     }
@@ -215,7 +225,7 @@ void processTypeNode(AST_NODE* idNodeAsType)
 void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTypeAttribute, int ignoreArrayFirstDimSize) // [Msg] 改很少 相似度極高
 {
     AST_NODE* typeNode = declarationNode->child;
-    TypeDescriptor *typeDescriptorOfTypeNode = typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
+    TypeDescriptor *typeNodeTypeDescr = typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
     AST_NODE* IDNode = typeNode->rightSibling;
     while(IDNode){
         if(declaredLocally(IDNode->semantic_value.identifierSemanticValue.identifierName)){
@@ -228,52 +238,55 @@ void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTy
             newAttribute->attributeKind = isVariableOrTypeAttribute;
             switch(IDNode->semantic_value.identifierSemanticValue.kind){
                 case NORMAL_ID:
-                    newAttribute->attr.typeDescriptor = typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
+                    newAttribute->attr.typeDescriptor = typeNodeTypeDescr;
                     break;
                 case ARRAY_ID:
                     newAttribute->attr.typeDescriptor = (TypeDescriptor*)malloc(sizeof(TypeDescriptor));
+                    ArrayProperties newArrayIDProperties = newAttribute->attr.typeDescriptor->properties.arrayProperties;
                     processDeclDimList(IDNode, newAttribute->attr.typeDescriptor, ignoreArrayFirstDimSize);
                     if(IDNode->dataType == ERROR_TYPE){
                         free(newAttribute->attr.typeDescriptor);
                         declarationNode->dataType = ERROR_TYPE;
                     }
-                    else if(typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR){
-                        newAttribute->attr.typeDescriptor->properties.arrayProperties.elementType = 
-                            typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->properties.dataType;
+                    else if(typeNodeTypeDescr->kind == SCALAR_TYPE_DESCRIPTOR){
+                        newArrayIDProperties.elementType = 
+                            typeNodeTypeDescr->properties.dataType;
                     }
-                    else if(typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR){
-                        int typeArrayDimension = typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
-                        int idArrayDimension = newAttribute->attr.typeDescriptor->properties.arrayProperties.dimension;
-                        newAttribute->attr.typeDescriptor->properties.arrayProperties.elementType = \
-                            typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->properties.arrayProperties.elementType;
-                        newAttribute->attr.typeDescriptor->properties.arrayProperties.dimension = \
+                    else if(typeNodeTypeDescr->kind == ARRAY_TYPE_DESCRIPTOR){
+                        int typeArrayDimension = typeNodeTypeDescr->properties.arrayProperties.dimension;
+                        int idArrayDimension = newArrayIDProperties.dimension;
+                        newArrayIDProperties.elementType =\
+                            typeNodeTypeDescr->properties.arrayProperties.elementType;
+                        newArrayIDProperties.dimension =\
                             typeArrayDimension + idArrayDimension;
-                        for(int indexType = 0, indexId = idArrayDimension; indexId < idArrayDimension + typeArrayDimension; ++indexType, ++indexId){
-                            newAttribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension[indexId] = 
-                                typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->properties.arrayProperties.sizeInEachDimension[indexType];  
+                        // [inf] to handle cases like: typedef int[5][10] FiveTenArray
+                        for(int indexType = 0, indexId = idArrayDimension; indexId < idArrayDimension + typeArrayDimension; indexType++, indexId++){
+                            newArrayIDProperties.sizeInEachDimension[indexId] = 
+                                typeNodeTypeDescr->properties.arrayProperties.sizeInEachDimension[indexType];  
                         }
                     }
                     break;
                 case WITH_INIT_ID:
-                    if(typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR){
-                        printErrorMsg(IDNode, TRY_TO_INIT_ARRAY); // [Msg] 不行喔?
+                    if(typeNodeTypeDescr->kind == ARRAY_TYPE_DESCRIPTOR){
+                        printErrorMsg(IDNode, TRY_TO_INIT_ARRAY); // [Msg] 不行喔? (ans: parser 裡好像就沒允許這種)
                         IDNode->dataType = ERROR_TYPE;
                         declarationNode->dataType = ERROR_TYPE;
                     }
                     else
-                        newAttribute->attr.typeDescriptor = typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
+                        newAttribute->attr.typeDescriptor = typeNodeTypeDescr;
                     break;
                 default:
-                    printf("[DEBUG] Unhandle case in declareIdList()\n");
+                    printf("[DEBUG] Unhandled case in declareIdList()\n");
                     IDNode->dataType = ERROR_TYPE;
                     declarationNode->dataType = ERROR_TYPE;
                     break;
             }
+
             if(IDNode->dataType == ERROR_TYPE){
                 free(newAttribute);
                 declarationNode->dataType = ERROR_TYPE;
             }
-            else{
+            else {
                 IDNode->semantic_value.identifierSemanticValue.symbolTableEntry =
                     enterSymbol(IDNode->semantic_value.identifierSemanticValue.identifierName, newAttribute);
             }
@@ -282,123 +295,114 @@ void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTy
     }
 }
 
-void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住了
+void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住了 (ans: 有看過了)
 {
     AST_NODE* returnTypeNode = declarationNode->child;
-
-    int errorOccur = 0;
     AST_NODE* functionNameID = returnTypeNode->rightSibling;
+    int errorFlag = 0;
+    
     if(declaredLocally(functionNameID->semantic_value.identifierSemanticValue.identifierName))
     {
         printErrorMsg(functionNameID, SYMBOL_REDECLARE);
         functionNameID->dataType = ERROR_TYPE;
-        errorOccur = 1;
+        errorFlag = 1;
     }
     
-    SymbolAttribute* attribute = NULL;
-    attribute = (SymbolAttribute*)malloc(sizeof(SymbolAttribute));
-    attribute->attributeKind = FUNCTION_SIGNATURE;
-    attribute->attr.functionSignature = (FunctionSignature*)malloc(sizeof(FunctionSignature));
-    attribute->attr.functionSignature->returnType = returnTypeNode->dataType;
-    attribute->attr.functionSignature->parameterList = NULL;
+    SymbolAttribute* functionAttribute = (SymbolAttribute*)malloc(sizeof(SymbolAttribute));
+    functionAttribute->attributeKind = FUNCTION_SIGNATURE;
+    functionAttribute->attr.functionSignature = (FunctionSignature*)malloc(sizeof(FunctionSignature));
+    functionAttribute->attr.functionSignature->returnType = returnTypeNode->dataType;
+    functionAttribute->attr.functionSignature->parameterList = NULL;
 
-    int enterFunctionNameToSymbolTable = 0;
-    if(!errorOccur)
+    if(!errorFlag) // [msg] removed "symbol table entry inserted" flag
     {
-        enterSymbol(functionNameID->semantic_value.identifierSemanticValue.identifierName, attribute);
-        enterFunctionNameToSymbolTable = 1;
+        enterSymbol(functionNameID->semantic_value.identifierSemanticValue.identifierName, functionAttribute);
     }
 
     openScope();
 
     AST_NODE *parameterListNode = functionNameID->rightSibling;
-    AST_NODE *traverseParameter = parameterListNode->child;
+    AST_NODE *curParameterNode = parameterListNode->child;
     int parametersCount = 0;
-    if(traverseParameter)
+    if(curParameterNode)
     {
-        ++parametersCount;
-        processDeclarationNode(traverseParameter);
-        AST_NODE *parameterID = traverseParameter->child->rightSibling;
-        if(traverseParameter->dataType == ERROR_TYPE)
+        parametersCount++;
+        processDeclarationNode(curParameterNode);
+        AST_NODE *parameterID = curParameterNode->child->rightSibling;
+        if(curParameterNode->dataType == ERROR_TYPE)
         {
-            errorOccur = 1;
+            errorFlag = 1;
         }
-        else if(!errorOccur)
+        else if(!errorFlag)
         {
             Parameter *parameter = (Parameter*)malloc(sizeof(Parameter));
             parameter->next = NULL;
             parameter->parameterName = parameterID->semantic_value.identifierSemanticValue.identifierName;
             parameter->type = parameterID->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
-            attribute->attr.functionSignature->parameterList = parameter;
+            functionAttribute->attr.functionSignature->parameterList = parameter;
         }
-        traverseParameter = traverseParameter->rightSibling;
+        curParameterNode = curParameterNode->rightSibling;
     }
 
-    Parameter *parameterListTail = attribute->attr.functionSignature->parameterList;
+    Parameter *prevParameterPtr = functionAttribute->attr.functionSignature->parameterList;
     
-    while(traverseParameter)
+    while(curParameterNode)
     {
-        ++parametersCount;
-        processDeclarationNode(traverseParameter);
-        AST_NODE *parameterID = traverseParameter->child->rightSibling;
-        if(traverseParameter->dataType == ERROR_TYPE)
+        parametersCount++;
+        processDeclarationNode(curParameterNode);
+        AST_NODE *parameterID = curParameterNode->child->rightSibling;
+        if(curParameterNode->dataType == ERROR_TYPE)
         {
-            errorOccur = 1;
+            errorFlag = 1;
         }
-        else if(!errorOccur)
+        else if(!errorFlag)
         {
             Parameter *parameter = (Parameter*)malloc(sizeof(Parameter));
             parameter->next = NULL;
             parameter->parameterName = parameterID->semantic_value.identifierSemanticValue.identifierName;
             parameter->type = parameterID->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
-            parameterListTail->next = parameter;
-            parameterListTail = parameter;
+            prevParameterPtr->next = parameter;
+            prevParameterPtr = parameter;
         }
-        traverseParameter = traverseParameter->rightSibling;
+        curParameterNode = curParameterNode->rightSibling;
     }
-    attribute->attr.functionSignature->parametersCount = parametersCount;
+    functionAttribute->attr.functionSignature->parametersCount = parametersCount;
 
-    if(errorOccur && (attribute != NULL))
+    if (errorFlag) // [msg] deleted condition: && (functionAttribute != NULL)
     {
-        Parameter* traverseParameter = attribute->attr.functionSignature->parameterList;
-        Parameter* next = NULL; 
-        while(traverseParameter)
+        Parameter* curParameterPtr = functionAttribute->attr.functionSignature->parameterList;
+        Parameter* nextParameterPtr = NULL; 
+        while(curParameterPtr)
         {
-            next = traverseParameter->next;
-            free(traverseParameter);
-            traverseParameter = next;
+            nextParameterPtr = curParameterPtr->next;
+            free(curParameterPtr);
+            curParameterPtr = nextParameterPtr;
         }
-        free(attribute->attr.functionSignature);
-        free(attribute);
-    }
+        free(functionAttribute->attr.functionSignature);
+        free(functionAttribute);
 
-    if(!errorOccur)
-    {
+        // [msg] moved error reporting and symbol table entry deletion to here
+        removeSymbol(functionNameID->semantic_value.identifierSemanticValue.identifierName);
+        declarationNode->dataType = ERROR_TYPE;
+    } 
+    else 
+    { // [inf] process function contents
         AST_NODE *blockNode = parameterListNode->rightSibling;
-        AST_NODE *traverseListNode = blockNode->child;
-        while(traverseListNode)
+        AST_NODE *curBlockContent = blockNode->child;
+        while(curBlockContent)
         {
-            processGeneralNode(traverseListNode);
-            traverseListNode = traverseListNode->rightSibling;
+            processGeneralNode(curBlockContent);
+            curBlockContent = curBlockContent->rightSibling;
         }
     }
 
     closeScope();
-
-    if(errorOccur && enterFunctionNameToSymbolTable)
-    {
-        declarationNode->dataType = ERROR_TYPE;
-        if(enterFunctionNameToSymbolTable)
-        {
-            removeSymbol(functionNameID->semantic_value.identifierSemanticValue.identifierName);
-        }
-    }
 }
 
 /*****************************************************************************************************/
-
 void checkIfStmt(AST_NODE* ifNode)
-{
+{   
+    // [msg] 已看過
     AST_NODE* checkExpr = ifNode->child;
     checkAssignOrExpr(checkExpr);
     AST_NODE* blockNode = checkExpr->rightSibling;
@@ -409,14 +413,16 @@ void checkIfStmt(AST_NODE* ifNode)
 
 void checkWhileStmt(AST_NODE* whileNode)
 {
+    // [msg] 已看過
     AST_NODE* checkExpr = whileNode->child;
     checkAssignOrExpr(checkExpr);
-    AST_NODE* bloockNode = checkExpr->rightSibling;
-    processStmtNode(bloockNode);
+    AST_NODE* blockNode = checkExpr->rightSibling;
+    processStmtNode(blockNode);
 }
 
 void checkForStmt(AST_NODE* forNode)
 {
+    // [msg] 已看過
     AST_NODE* initExpr = forNode->child;
     processGeneralNode(initExpr);
     AST_NODE* checkExpr = initExpr->rightSibling;
@@ -429,13 +435,21 @@ void checkForStmt(AST_NODE* forNode)
 
 void checkAssignOrExpr(AST_NODE* assignOrExprRelatedNode)
 {
-    if(assignOrExprRelatedNode->nodeType == STMT_NODE)
-        if(assignOrExprRelatedNode->semantic_value.stmtSemanticValue.kind == ASSIGN_STMT)
-            checkAssignmentStmt(assignOrExprRelatedNode);
-        else if(assignOrExprRelatedNode->semantic_value.stmtSemanticValue.kind == FUNCTION_CALL_STMT)
-            checkFunctionCall(assignOrExprRelatedNode);
-    else
+    // [msg] 已看過
+    if(assignOrExprRelatedNode->nodeType == STMT_NODE) {
+        switch (assignOrExprRelatedNode->semantic_value.stmtSemanticValue.kind)
+        {
+            case ASSIGN_STMT:
+                checkAssignmentStmt(assignOrExprRelatedNode);
+                break;
+            case FUNCTION_CALL_STMT:
+                checkFunctionCall(assignOrExprRelatedNode);
+                break;
+        }
+    }
+    else {
         processExprRelatedNode(assignOrExprRelatedNode);
+    }
 }
 
 void checkAssignmentStmt(AST_NODE* assignmentNode)
@@ -446,10 +460,12 @@ void checkAssignmentStmt(AST_NODE* assignmentNode)
     if(opL->dataType == ERROR_TYPE || opR->dataType == ERROR_TYPE)
         assignmentNode->dataType = ERROR_TYPE;
     
+    // [msg] type conversion 可以先不用做？
     assignmentNode->dataType = getBiggerType(opL->dataType, opR->dataType);
 }
 
 void checkWriteFunction(AST_NODE* functionCallNode) // [Inf] just for write()
+// [msg] don't we have to check read() and fread() also?
 {
     AST_NODE* funcIDNode = functionCallNode->child;
     AST_NODE* paraList = funcIDNode->rightSibling;
@@ -476,15 +492,32 @@ void checkWriteFunction(AST_NODE* functionCallNode) // [Inf] just for write()
         functionCallNode->dataType = VOID_TYPE;
 }
 
+void checkReadFunction(AST_NODE* functionCallNode) {
+    AST_NODE* funcIDNode = functionCallNode->child;
+    AST_NODE* paraList = funcIDNode->rightSibling;
+    AST_NODE* paraPtr = paraList->child;
+
+    if (paraPtr->nodeType != NUL_NODE) {
+        printErrorMsg(funcIDNode, TOO_MANY_ARGUMENTS);
+        functionCallNode->dataType = ERROR_TYPE;
+    } else {
+        functionCallNode->dataType = VOID_TYPE;
+    }
+}
+
 void checkFunctionCall(AST_NODE* functionCallNode)
 {
     AST_NODE* funcIDNode = functionCallNode->child;
-    if(strcmp(funcIDNode->semantic_value.identifierSemanticValue.identifierName, "write") == 0){
+    const char *funcIDString = funcIDNode->semantic_value.identifierSemanticValue.identifierName;
+    if(strcmp(funcIDString, "write") == 0){
         checkWriteFunction(functionCallNode);
+        return;
+    } else if (strcmp(funcIDString, "read") == 0 || strcmp(funcIDString, "fread") == 0){ 
+        checkReadFunction(functionCallNode);
         return;
     }
 
-    SymbolTableEntry* entry = retrieveSymbol(funcIDNode->semantic_value.identifierSemanticValue.identifierName);
+    SymbolTableEntry* entry = retrieveSymbol(funcIDString);
     funcIDNode->semantic_value.identifierSemanticValue.symbolTableEntry = entry;
 
     if(entry == NULL){ // [Ass] 1.a)
@@ -507,7 +540,7 @@ void checkFunctionCall(AST_NODE* functionCallNode)
     Parameter* formalPara = entry->attribute->attr.functionSignature->parameterList;
 
     int paraError = 0;
-    while(paraPtr && formalPara){
+    while(paraPtr && formalPara){ // [Ass] 3.c)
         if(paraPtr->dataType == ERROR_TYPE)
             paraError = 1;
         else{
@@ -541,8 +574,9 @@ void checkParameterPassing(Parameter* formalParameter, AST_NODE* actualParameter
         printErrorMsgSpecial(actualParameter, formalParameter->type->properties.dataType, PASS_ARRAY_TO_SCALAR);
         actualParameter->dataType = ERROR_TYPE;
     }
+    // [msg] 這邊你原本照上面那條 (***_PTR_TYPE) 應該錯了
     else if(formalParameter->type->kind == ARRAY_TYPE_DESCRIPTOR && 
-        !(actualParameter->dataType == INT_PTR_TYPE || actualParameter->dataType == FLOAT_PTR_TYPE)){
+        !(actualParameter->dataType == INT_TYPE || actualParameter->dataType == FLOAT_TYPE )){
         printErrorMsgSpecial(actualParameter, formalParameter->type->properties.dataType, PASS_SCALAR_TO_ARRAY);
         actualParameter->dataType = ERROR_TYPE;
     }
@@ -569,8 +603,8 @@ void checkReturnStmt(AST_NODE* returnNode)
         if(returnType != VOID_TYPE)
             errorFlag = 1;
     else{
-        processExprRelatedNode(returnNode->child);
-        if(returnType != returnNode->child->dataType)
+        processExprRelatedNode(returnNode->child); 
+        if(returnType != returnNode->child->dataType) // [Msg] 這邊是不是不管怎樣都應該要有 RETURN_TYPE_UNMATCH
             if (!((returnType == FLOAT_TYPE && returnNode->child->dataType == INT_TYPE) || (returnType == INT_TYPE && returnNode->child->dataType == FLOAT_TYPE)))
                 errorFlag = 1;
     }
@@ -587,32 +621,39 @@ void checkReturnStmt(AST_NODE* returnNode)
 
 void getExprOrConstValue(AST_NODE* exprOrConstNode, int* iValue, float* fValue)
 {
-    if(exprOrConstNode->nodeType == CONST_VALUE_NODE)
-        if(exprOrConstNode->dataType == INT_TYPE)
+    if(exprOrConstNode->nodeType == CONST_VALUE_NODE) {
+        if(exprOrConstNode->dataType == INT_TYPE) {
             if(fValue)
                 *fValue = exprOrConstNode->semantic_value.const1->const_u.intval;
             else
                 *iValue = exprOrConstNode->semantic_value.const1->const_u.intval;
+        }
         else
             *fValue = exprOrConstNode->semantic_value.const1->const_u.fval;
-    else
-        if(exprOrConstNode->dataType == INT_TYPE)
+    }
+    else {
+        if(exprOrConstNode->dataType == INT_TYPE) {
             if(fValue)
                 *fValue = exprOrConstNode->semantic_value.exprSemanticValue.constEvalValue.iValue;
             else
                 *iValue = exprOrConstNode->semantic_value.exprSemanticValue.constEvalValue.iValue;
+        }
         else
             *fValue = exprOrConstNode->semantic_value.exprSemanticValue.constEvalValue.fValue;
+    }
 }
 
 void evaluateExprValue(AST_NODE* exprNode)
+// [msg] 這邊多改了：避免傳 NULL ptr 給 getExprOrConstValue() 以免出事
 {
     if(exprNode->semantic_value.exprSemanticValue.kind == BINARY_OPERATION){
-        AST_NODE* opL = exprNode->child, *opR = opL->rightSibling;
+        AST_NODE *opL = exprNode->child;
+        AST_NODE *opR = opL->rightSibling;
         if(opL->dataType == INT_TYPE && opR->dataType == INT_TYPE){
             int valL = 0, valR = 0, result;
-            getExprOrConstValue(opL, &valL, NULL);
-            getExprOrConstValue(opR, &valR, NULL);
+            float fvalL, fvalR;
+            getExprOrConstValue(opL, &valL, &fvalL);
+            getExprOrConstValue(opR, &valR, &fvalR);
             exprNode->dataType = INT_TYPE;
             switch(exprNode->semantic_value.exprSemanticValue.op.binaryOp){
                 case BINARY_OP_ADD: result = valL + valR;  break;
@@ -635,23 +676,24 @@ void evaluateExprValue(AST_NODE* exprNode)
         }
         else
         {
-            float valL = 0, valR = 0, result;
-            getExprOrConstValue(opL, NULL, &valL);
-            getExprOrConstValue(opR, NULL, &valR);
+            float fvalL = 0, fvalR = 0, result;
+            int valL, valR;
+            getExprOrConstValue(opL, &valL, &fvalL);
+            getExprOrConstValue(opR, &valR, &fvalR);
             exprNode->dataType = FLOAT_TYPE;
             switch(exprNode->semantic_value.exprSemanticValue.op.binaryOp){
-                case BINARY_OP_ADD: result = valL + valR;  break;
-                case BINARY_OP_SUB: result = valL - valR;  break;
-                case BINARY_OP_MUL: result = valL * valR;  break;
-                case BINARY_OP_DIV: result = valL / valR;  break;
-                case BINARY_OP_EQ:  result = valL == valR; break;
-                case BINARY_OP_GE:  result = valL >= valR; break;
-                case BINARY_OP_LE:  result = valL <= valR; break;
-                case BINARY_OP_NE:  result = valL != valR; break;
-                case BINARY_OP_GT:  result = valL > valR;  break;
-                case BINARY_OP_LT:  result = valL < valR;  break;
-                case BINARY_OP_AND: result = valL && valR; break;
-                case BINARY_OP_OR:  result = valL || valR; break;
+                case BINARY_OP_ADD: result = fvalL + fvalR;  break;
+                case BINARY_OP_SUB: result = fvalL - fvalR;  break;
+                case BINARY_OP_MUL: result = fvalL * fvalR;  break;
+                case BINARY_OP_DIV: result = fvalL / fvalR;  break;
+                case BINARY_OP_EQ:  result = fvalL == fvalR; break;
+                case BINARY_OP_GE:  result = fvalL >= fvalR; break;
+                case BINARY_OP_LE:  result = fvalL <= fvalR; break;
+                case BINARY_OP_NE:  result = fvalL != fvalR; break;
+                case BINARY_OP_GT:  result = fvalL > fvalR;  break;
+                case BINARY_OP_LT:  result = fvalL < fvalR;  break;
+                case BINARY_OP_AND: result = fvalL && fvalR; break;
+                case BINARY_OP_OR:  result = fvalL || fvalR; break;
                 default:
                     printf("[DEBUG] Unhandled case in evaluateExprValue()\n");
                     break;
@@ -663,7 +705,8 @@ void evaluateExprValue(AST_NODE* exprNode)
         AST_NODE* operand = exprNode->child;
         if(operand->dataType == INT_TYPE){
             int result = 0;
-            getExprOrConstValue(operand, &result, NULL);
+            float fholder;
+            getExprOrConstValue(operand, &result, &fholder);
             exprNode->dataType = INT_TYPE;
             switch(exprNode->semantic_value.exprSemanticValue.op.unaryOp){
                 case UNARY_OP_POSITIVE: break;
@@ -678,7 +721,8 @@ void evaluateExprValue(AST_NODE* exprNode)
         else
         {
             float result = 0;
-            getExprOrConstValue(operand, NULL, &result);
+            int iholder;
+            getExprOrConstValue(operand, &iholder, &result);
             exprNode->dataType = FLOAT_TYPE;
             switch(exprNode->semantic_value.exprSemanticValue.op.unaryOp){
                 case UNARY_OP_POSITIVE: break;
@@ -696,7 +740,8 @@ void evaluateExprValue(AST_NODE* exprNode)
 void processExprNode(AST_NODE* exprNode)
 {
     if(exprNode->semantic_value.exprSemanticValue.kind == BINARY_OPERATION){
-        AST_NODE* opL = exprNode->child, *opR = opL->rightSibling;
+        AST_NODE *opL = exprNode->child;
+        AST_NODE *opR = opL->rightSibling;
         processExprRelatedNode(opL);
         processExprRelatedNode(opR);
         if(opL->dataType == ERROR_TYPE || opR->dataType == ERROR_TYPE)
@@ -732,37 +777,46 @@ void processExprNode(AST_NODE* exprNode)
 
 void processExprRelatedNode(AST_NODE* exprRelatedNode)
 {
+    // [msg] 看過了
     switch(exprRelatedNode->nodeType){
         case EXPR_NODE:
-            processExprNode(exprRelatedNode); break;
+            processExprNode(exprRelatedNode); 
+            break;
         case STMT_NODE:
-            checkFunctionCall(exprRelatedNode); break;
+            checkFunctionCall(exprRelatedNode); 
+            break;
         case IDENTIFIER_NODE:
-            processVariableRValue(exprRelatedNode); break;
+            processVariableRValue(exprRelatedNode); 
+            break;
         case CONST_VALUE_NODE:
-            processConstValueNode(exprRelatedNode); break;
+            processConstValueNode(exprRelatedNode); 
+            break;
         default:
             printf("[DEBUG] Unhandle case in processExprRelatedNode()\n");
             exprRelatedNode->dataType = ERROR_TYPE;
-            break;
     }
 }
 
-void processVariableLValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高
+void processVariableLValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高 // [msg] 我大改過 加了 3.a)
 {
-    SymbolTableEntry *entry = retrieveSymbol(idNode->semantic_value.identifierSemanticValue.identifierName);
+    IdentifierSemanticValue IDSemanticValue = idNode->semantic_value.identifierSemanticValue;
+    SymbolTableEntry *entry = retrieveSymbol(IDSemanticValue.identifierName);
     if(!entry){
         printErrorMsg(idNode, SYMBOL_UNDECLARED); // [Ass] 1.a)
         idNode->dataType = ERROR_TYPE;
         return;
     }
-    idNode->semantic_value.identifierSemanticValue.symbolTableEntry = entry;
+    IDSemanticValue.symbolTableEntry = entry;
    
-    TypeDescriptor *typeDescriptor = idNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;        
-    if(idNode->semantic_value.identifierSemanticValue.kind == NORMAL_ID){
-        idNode->dataType = typeDescriptor->properties.dataType;
+    TypeDescriptor *varTypeDescr = IDSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;        
+    if(IDSemanticValue.kind == NORMAL_ID){
+        idNode->dataType = varTypeDescr->properties.dataType;
     }
-    else if(idNode->semantic_value.identifierSemanticValue.kind == ARRAY_ID){
+    else if(IDSemanticValue.kind == ARRAY_ID){
+        if(varTypeDescr->kind == SCALAR_TYPE_DESCRIPTOR){ // [Inf] e.g., int a; a[2][4] = 5;
+            printErrorMsg(idNode, NOT_ARRAY);
+            idNode->dataType = ERROR_TYPE;
+        }
         int dimension = 0;
         AST_NODE *dimPtr = idNode->child;
         while(dimPtr){
@@ -770,44 +824,56 @@ void processVariableLValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高
             processExprRelatedNode(dimPtr);
             if(dimPtr->dataType == ERROR_TYPE)
                 idNode->dataType = ERROR_TYPE;
-            else if(dimPtr->dataType == FLOAT_TYPE){
+            else if(dimPtr->dataType == FLOAT_TYPE){ // [Ass] 3.b)
                 printErrorMsg(idNode, ARRAY_SUBSCRIPT_NOT_INT);
                 idNode->dataType = ERROR_TYPE;
             }
             dimPtr = dimPtr->rightSibling;
         }
-        if(typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR){
-            printErrorMsg(idNode, NOT_ARRAY);
+        // [Ass/Msg] implement checkpoint 3.a) here
+        int correctDims = entry->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
+        if (dimension < correctDims) {
+            printErrorMsg(idNode, NOT_ASSIGNABLE); // [Ass] 3.a)
             idNode->dataType = ERROR_TYPE;
         }
-        else
-            idNode->dataType = typeDescriptor->properties.arrayProperties.elementType;
+        else if (dimension > correctDims) {
+            printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION); // [Ass] 3.a)
+            idNode->dataType = ERROR_TYPE;
+        }
+        else {
+            idNode->dataType = varTypeDescr->properties.arrayProperties.elementType;
+        }
     }
 }
 
-void processVariableRValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高
-{
-    SymbolTableEntry *entry = retrieveSymbol(idNode->semantic_value.identifierSemanticValue.identifierName);
+void processVariableRValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高 // [msg] 我大改過 加了 3.a)
+{   
+    IdentifierSemanticValue IDSemanticValue = idNode->semantic_value.identifierSemanticValue;
+    SymbolTableEntry *entry = retrieveSymbol(IDSemanticValue.identifierName);
     
-    idNode->semantic_value.identifierSemanticValue.symbolTableEntry = entry;
-    if(!entry){
+    IDSemanticValue.symbolTableEntry = entry;
+    if(!entry) {
         printErrorMsg(idNode, SYMBOL_UNDECLARED);
         idNode->dataType = ERROR_TYPE;
         return;
     }
 
-    TypeDescriptor *typeDescriptor = idNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
+    TypeDescriptor *typeDescriptor = IDSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
         
-    if(idNode->semantic_value.identifierSemanticValue.kind == NORMAL_ID){
-        if(typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR)
-            if(typeDescriptor->properties.arrayProperties.elementType == INT_TYPE)
-                idNode->dataType = INT_PTR_TYPE;
-            else
-                idNode->dataType = FLOAT_PTR_TYPE;
-        else
+    if(IDSemanticValue.kind == NORMAL_ID){ // [msg] pointer arithmetic 應該不用支援，算做 error？ (不過後面也沒)
+        if(typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR) {
+            printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION_TOO_FEW);
+            idNode->dataType = ERROR_TYPE;
+            // if(typeDescriptor->properties.arrayProperties.elementType == INT_TYPE)
+            //     idNode->dataType = INT_PTR_TYPE;
+            // else
+            //     idNode->dataType = FLOAT_PTR_TYPE;
+        }
+        else {
             idNode->dataType = typeDescriptor->properties.dataType;
+        }
     }
-    else if(idNode->semantic_value.identifierSemanticValue.kind == ARRAY_ID){
+    else if(IDSemanticValue.kind == ARRAY_ID){
         if(typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR){
             printErrorMsg(idNode, NOT_ARRAY);
             idNode->dataType = ERROR_TYPE;
@@ -827,12 +893,18 @@ void processVariableRValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高
                 dimPtr = dimPtr->rightSibling;
             }
             if(idNode->dataType != ERROR_TYPE){
-                if(dimension == typeDescriptor->properties.arrayProperties.dimension)
+                int correctDims = typeDescriptor->properties.arrayProperties.dimension;
+                if (dimension < correctDims) {
+                    printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION_TOO_FEW); // [Ass] 3.a)
+                    idNode->dataType = ERROR_TYPE;
+                }
+                else if (dimension > correctDims) {
+                    printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION); // [Ass] 3.a)
+                    idNode->dataType = ERROR_TYPE;
+                }
+                else {
                     idNode->dataType = typeDescriptor->properties.arrayProperties.elementType;
-                else if(typeDescriptor->properties.arrayProperties.elementType == INT_TYPE)
-                    idNode->dataType = INT_PTR_TYPE;
-                else
-                    idNode->dataType = FLOAT_PTR_TYPE;
+                }
             }
         }
     }
@@ -933,32 +1005,33 @@ void processDeclDimList(AST_NODE* idNode, TypeDescriptor* typeDescriptor, int ig
 {
     typeDescriptor->kind = ARRAY_TYPE_DESCRIPTOR;
     AST_NODE* dimList = idNode->child;
-    AST_NODE* dimPtr = dimList;
+    AST_NODE* curDimNode = dimList;
     int dimension = 0;
-    if(ignoreFirstDimSize && dimPtr->nodeType == NUL_NODE){ // [Inf] int arr[][10], ...
-        typeDescriptor->properties.arrayProperties.sizeInEachDimension[dimension++] = 0;
-        dimPtr = dimPtr->rightSibling;
+    ArrayProperties newArrayProperties = typeDescriptor->properties.arrayProperties;
+    if(ignoreFirstDimSize && curDimNode->nodeType == NUL_NODE){ // [Inf] int arr[][10], ...
+        newArrayProperties.sizeInEachDimension[dimension++] = 0;
+        curDimNode = curDimNode->rightSibling;
     }
-    while(dimPtr){
-        processExprRelatedNode(dimPtr);
-        if(dimPtr->dataType == ERROR_TYPE)
+    while(curDimNode){
+        processExprRelatedNode(curDimNode);
+        if(curDimNode->dataType == ERROR_TYPE)
             idNode->dataType = ERROR_TYPE;
-        else if(dimPtr->dataType == FLOAT_TYPE){ // [Ass] 3.b)
-            printErrorMsg(dimPtr->parent, ARRAY_SIZE_NOT_INT);
+        else if(curDimNode->dataType == FLOAT_TYPE){ // [Ass] 3.b)
+            printErrorMsg(curDimNode->parent, ARRAY_SIZE_NOT_INT);
             idNode->dataType = ERROR_TYPE;
         }
-        else if(dimPtr->semantic_value.exprSemanticValue.isConstEval &&
-            dimPtr->semantic_value.exprSemanticValue.constEvalValue.iValue < 0){ // [Ass] Extra 1
-            printErrorMsg(dimPtr->parent, ARRAY_SIZE_NEGATIVE);
+        else if(curDimNode->semantic_value.exprSemanticValue.isConstEval &&
+            curDimNode->semantic_value.exprSemanticValue.constEvalValue.iValue < 0){ // [Ass] Extra 1
+            printErrorMsg(curDimNode->parent, ARRAY_SIZE_NEGATIVE);
             idNode->dataType = ERROR_TYPE;
         }
         else
-            typeDescriptor->properties.arrayProperties.sizeInEachDimension[dimension] = 
-                dimPtr->semantic_value.exprSemanticValue.constEvalValue.iValue;
+            newArrayProperties.sizeInEachDimension[dimension] = 
+                curDimNode->semantic_value.exprSemanticValue.constEvalValue.iValue;
 
         dimension++;
-        dimPtr = dimPtr->rightSibling;
+        curDimNode = curDimNode->rightSibling;
     }
 
-    typeDescriptor->properties.arrayProperties.dimension = dimension;
+    newArrayProperties.dimension = dimension;
 }

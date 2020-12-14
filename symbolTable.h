@@ -40,8 +40,8 @@ typedef struct TypeDescriptor
     TypeDescriptorKind kind;
     union
     {
-        DATA_TYPE dataType;//kind: SCALAR_TYPE_DESCRIPTOR
-        ArrayProperties arrayProperties;//kind: ARRAY_TYPE_DESCRIPTOR
+        DATA_TYPE dataType;// kind: SCALAR_TYPE_DESCRIPTOR
+        ArrayProperties arrayProperties;// kind: ARRAY_TYPE_DESCRIPTOR
     } properties;
 } TypeDescriptor;
 

@@ -4,7 +4,7 @@
 #include <stdio.h>
 // This file is for reference only, you are not required to follow the implementation. //
 
-const char **typeNameStrings = {
+char typeNameStrings[8][16] = {
     'int', 'float', 'void', 'int *', 'float *', 'char *', 'unnamed', 'unnamed'
 };
 
