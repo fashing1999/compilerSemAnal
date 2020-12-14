@@ -7,8 +7,6 @@
 // You only need to check for errors stated in the hw4 document. //
 int g_anyErrorOccur = 0;
 
-extern char **typeNameStrings;
-
 DATA_TYPE getBiggerType(DATA_TYPE dataType1, DATA_TYPE dataType2);
 void processProgramNode(AST_NODE *programNode);
 void processDeclarationNode(AST_NODE* declarationNode);
@@ -18,7 +16,7 @@ void processDeclDimList(AST_NODE* variableDeclDimList, TypeDescriptor* typeDescr
 void processTypeNode(AST_NODE* typeNode);
 void processBlockNode(AST_NODE* blockNode);
 void processStmtNode(AST_NODE* stmtNode);
-void processGeneralNode(AST_NODE *node);
+void processGeneralNode(AST_NODE *node, int isInFunc);
 void checkAssignOrExpr(AST_NODE* assignOrExprRelatedNode);
 void checkWhileStmt(AST_NODE* whileNode);
 void checkForStmt(AST_NODE* forNode);
@@ -27,12 +25,12 @@ void checkIfStmt(AST_NODE* ifNode);
 void checkWriteFunction(AST_NODE* functionCallNode);
 void checkReadFunction(AST_NODE* functionCallNode);
 void checkFunctionCall(AST_NODE* functionCallNode);
-void processExprRelatedNode(AST_NODE* exprRelatedNode);
+void processExprRelatedNode(AST_NODE* exprRelatedNode, int isInFunc);
 void checkParameterPassing(Parameter* formalParameter, AST_NODE* actualParameter);
 void checkReturnStmt(AST_NODE* returnNode);
 void processExprNode(AST_NODE* exprNode);
 void processVariableLValue(AST_NODE* idNode);
-void processVariableRValue(AST_NODE* idNode);
+void processVariableRValue(AST_NODE* idNode, int isInFunc);
 void processConstValueNode(AST_NODE* constValueNode);
 void getExprOrConstValue(AST_NODE* exprOrConstNode, int* iValue, float* fValue);
 void evaluateExprValue(AST_NODE* exprNode);
@@ -67,6 +65,25 @@ typedef enum ErrorMsgKind
     PASS_SCALAR_TO_ARRAY
 } ErrorMsgKind;
 
+char* typeNameString(int n){
+    switch(n){
+        case 0:
+            return "int";
+        case 1:
+            return "float";
+        case 2:
+            return "void";
+        case 3:
+            return "int *";
+        case 4:
+            return "float *";
+        case 5:
+            return "char *";
+        default:
+            return "unnamed";
+    }
+}
+
 void printErrorMsgSpecial(AST_NODE* node1, DATA_TYPE type2, ErrorMsgKind errorMsgKind) // [Msg] 應該沒錯吧
 {
     g_anyErrorOccur = 1;
@@ -74,12 +91,13 @@ void printErrorMsgSpecial(AST_NODE* node1, DATA_TYPE type2, ErrorMsgKind errorMs
     switch(errorMsgKind){
         case PASS_ARRAY_TO_SCALAR: // [Ass] 3.c)
         case PASS_SCALAR_TO_ARRAY:
-            printf("invalid conversion from \'%s\' to \'%s\'.\n", typeNameStrings[node1->dataType], typeNameStrings[type2]);
+            printf("invalid conversion from \'%s\' to \'%s\'.\n", typeNameString(node1->dataType), typeNameString(type2));
             break;
         default:
             printf("[DEBUG] Unhandled case in printErrorMsgSpecial()\n");
             break;
     }
+    printf("\n");
 }
 
 void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) // [Msg] del(n) := "如果不用留的話，有n個地方要刪掉"
@@ -92,8 +110,10 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) // [Msg] del(n) :=
             printf("ID \'%s\' is not a type name.\n",
                 node->semantic_value.identifierSemanticValue.identifierName);
             break;
-        case SYMBOL_REDECLARE: //[Ass] 1.b)
-            printf("redeclaration of \'%s %s\'.\n", typeNameStrings[node->dataType], name);
+        case SYMBOL_REDECLARE: //[Ass] 1.b)         
+            printf("redeclaration of \'%s %s\'.\n", 
+                node->leftmostSibling->semantic_value.identifierSemanticValue.identifierName, name
+            );
             break;
         case SYMBOL_UNDECLARED: //[Ass] 1.a)
             printf("\'%s\' was not declared in this scope.\n", name);
@@ -114,10 +134,6 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) // [Msg] del(n) :=
         case RETURN_TYPE_UNMATCH: // [Ass] 2.b) [Msg] 但是gcc好像允許這個功能!!?
             printf("no warning generated.\n");
             break;
-        case NOT_ARRAY: // [Ass] 3.c), 不太確定
-            printf("[DEBUG] ID \'%s\' is not array.\n",
-                node->semantic_value.identifierSemanticValue.identifierName);
-            break;
         case ARRAY_SIZE_NOT_INT: // [Ass] 3.b)
             printf("array subscript is not an integer\n");
             break;
@@ -133,13 +149,17 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) // [Msg] del(n) :=
         case INCOMPATIBLE_ARRAY_DIMENSION: //[Ass] 3.a)
             printf("subscripted value is neither array nor pointer nor vector\n");
             break;
+        case NOT_ARRAY:
+            printf("subscripted value is neither array nor pointer nor vector\n");
+            break;
         case NOT_ASSIGNABLE: //[Ass] 3.a)
-            printf("assignment to expression with array type");
+            printf("assignment to expression with array type\n");
             break;
         default:
             printf("[DEBUG] Unhandled case in printErrorMsg()\n");
             break;
     }
+    printf("\n");
 }
 
 void semanticAnalysis(AST_NODE *root)
@@ -163,7 +183,7 @@ void processProgramNode(AST_NODE *programNode)
     AST_NODE *node = programNode->child;
     while(node){
         if(node->nodeType == VARIABLE_DECL_LIST_NODE)   // [Inf] global variable
-            processGeneralNode(node);
+            processGeneralNode(node, 0);
         else                                            // [Inf] function declaration
             processDeclarationNode(node);
         
@@ -241,42 +261,49 @@ void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTy
                     newAttribute->attr.typeDescriptor = typeNodeTypeDescr;
                     break;
                 case ARRAY_ID:
-                    printf("[declaring array] %s (line #%d).\n", 
-                        IDNode->semantic_value.identifierSemanticValue.identifierName, IDNode->linenumber
-                    );
+                    // printf("[declaring array] %s (line #%d). ", 
+                    //     IDNode->semantic_value.identifierSemanticValue.identifierName, IDNode->linenumber
+                    // );
+                    //printf("type_of_var: %s\n", typeNode->semantic_value.identifierSemanticValue.identifierName);
                     newAttribute->attr.typeDescriptor = (TypeDescriptor*)malloc(sizeof(TypeDescriptor));
-                    ArrayProperties newArrayIDProperties = newAttribute->attr.typeDescriptor->properties.arrayProperties;
                     processDeclDimList(IDNode, newAttribute->attr.typeDescriptor, ignoreArrayFirstDimSize);
+                    ArrayProperties newArrayIDProperties = newAttribute->attr.typeDescriptor->properties.arrayProperties;
+                    //printf("[gotten formal dimension] %d", newAttribute->attr.typeDescriptor->properties.arrayProperties.dimension);
                     if(IDNode->dataType == ERROR_TYPE){
                         free(newAttribute->attr.typeDescriptor);
                         declarationNode->dataType = ERROR_TYPE;
                     }
                     else if(typeNodeTypeDescr->kind == SCALAR_TYPE_DESCRIPTOR){
+                        //printf("???\n");
                         newArrayIDProperties.elementType = 
                             typeNodeTypeDescr->properties.dataType;
                     }
                     else if(typeNodeTypeDescr->kind == ARRAY_TYPE_DESCRIPTOR){
+                    //else{
                         int typeArrayDimension = typeNodeTypeDescr->properties.arrayProperties.dimension;
                         int idArrayDimension = newArrayIDProperties.dimension;
-                        newArrayIDProperties.elementType =\
+                        //printf("is_array, type.dim = %d | id.dim = %d\n", typeArrayDimension, idArrayDimension);
+                        newArrayIDProperties.elementType =
                             typeNodeTypeDescr->properties.arrayProperties.elementType;
-                        newArrayIDProperties.dimension =\
+                        newArrayIDProperties.dimension =
                             typeArrayDimension + idArrayDimension;
-                        // [inf] to handle cases like: typedef int[5][10] FiveTenArray
+                        // [inf] to handle cases like: typedef int FiveTenArray[5][10]
                         for(int indexType = 0, indexId = idArrayDimension; indexId < idArrayDimension + typeArrayDimension; indexType++, indexId++){
                             newArrayIDProperties.sizeInEachDimension[indexId] = 
                                 typeNodeTypeDescr->properties.arrayProperties.sizeInEachDimension[indexType];  
                         }
+                        newAttribute->attr.typeDescriptor->properties.arrayProperties = newArrayIDProperties;    
                     }
                     break;
                 case WITH_INIT_ID:
-                    if(typeNodeTypeDescr->kind == ARRAY_TYPE_DESCRIPTOR){
-                        printErrorMsg(IDNode, TRY_TO_INIT_ARRAY); // [Msg] 不行喔? (ans: parser 裡好像就沒允許這種)
+                    newAttribute->attr.typeDescriptor = typeNodeTypeDescr;
+                    AST_NODE *assignExpr = IDNode->child;
+                    processExprRelatedNode(assignExpr, 0);
+                    if (assignExpr->dataType == ERROR_TYPE) {
                         IDNode->dataType = ERROR_TYPE;
                         declarationNode->dataType = ERROR_TYPE;
                     }
-                    else
-                        newAttribute->attr.typeDescriptor = typeNodeTypeDescr;
+                    
                     break;
                 default:
                     printf("[DEBUG] Unhandled case in declareIdList()\n");
@@ -393,7 +420,7 @@ void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住�
         AST_NODE *curBlockContent = blockNode->child;
         while(curBlockContent)
         {
-            processGeneralNode(curBlockContent);
+            processGeneralNode(curBlockContent, 0);
             curBlockContent = curBlockContent->rightSibling;
         }
     }
@@ -426,11 +453,11 @@ void checkForStmt(AST_NODE* forNode)
 {
     // [msg] 已看過
     AST_NODE* initExpr = forNode->child;
-    processGeneralNode(initExpr);
+    processGeneralNode(initExpr, 0);
     AST_NODE* checkExpr = initExpr->rightSibling;
-    processGeneralNode(checkExpr);
+    processGeneralNode(checkExpr, 0);
     AST_NODE* actExpr = checkExpr->rightSibling;
-    processGeneralNode(actExpr);
+    processGeneralNode(actExpr, 0);
     AST_NODE* blockNode = actExpr->rightSibling;
     processStmtNode(blockNode);
 }
@@ -450,7 +477,7 @@ void checkAssignOrExpr(AST_NODE* assignOrExprRelatedNode)
         }
     }
     else {
-        processExprRelatedNode(assignOrExprRelatedNode);
+        processExprRelatedNode(assignOrExprRelatedNode, 0);
     }
 }
 
@@ -458,7 +485,7 @@ void checkAssignmentStmt(AST_NODE* assignmentNode)
 {
     AST_NODE* opL = assignmentNode->child, *opR = opL->rightSibling;
     processVariableLValue(opL);
-    processExprRelatedNode(opR);
+    processExprRelatedNode(opR, 0);
     if(opL->dataType == ERROR_TYPE || opR->dataType == ERROR_TYPE)
         assignmentNode->dataType = ERROR_TYPE;
     
@@ -471,7 +498,7 @@ void checkWriteFunction(AST_NODE* functionCallNode) // [Inf] just for write()
 {
     AST_NODE* funcIDNode = functionCallNode->child;
     AST_NODE* paraList = funcIDNode->rightSibling;
-    processGeneralNode(paraList);
+    processGeneralNode(paraList, 0);
     
     int paraCount = 0;
     AST_NODE* paraPtr = paraList->child;
@@ -536,7 +563,7 @@ void checkFunctionCall(AST_NODE* functionCallNode)
     }
 
     AST_NODE* paraList = funcIDNode->rightSibling;
-    processGeneralNode(paraList);
+    processGeneralNode(paraList, 1);
 
     AST_NODE* paraPtr = paraList->child;
     Parameter* formalPara = entry->attribute->attr.functionSignature->parameterList;
@@ -571,6 +598,10 @@ void checkFunctionCall(AST_NODE* functionCallNode)
 
 void checkParameterPassing(Parameter* formalParameter, AST_NODE* actualParameter)
 {    
+    // printf("[in param checking] line #%d.\n", actualParameter->linenumber);
+    // TypeDescriptorKind actKind = actualParameter->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor->kind;
+    // TypeDescriptorKind actKind = actualParameter->dataType
+    // printf(" -- act_name: %d\n", actualParameter->dataType);
     if(formalParameter->type->kind == SCALAR_TYPE_DESCRIPTOR && 
         (actualParameter->dataType == INT_PTR_TYPE || actualParameter->dataType == FLOAT_PTR_TYPE)){
         printErrorMsgSpecial(actualParameter, formalParameter->type->properties.dataType, PASS_ARRAY_TO_SCALAR);
@@ -578,7 +609,7 @@ void checkParameterPassing(Parameter* formalParameter, AST_NODE* actualParameter
     }
     // [msg] 這邊你原本照上面那條 (***_PTR_TYPE) 應該錯了
     else if(formalParameter->type->kind == ARRAY_TYPE_DESCRIPTOR && 
-        !(actualParameter->dataType == INT_TYPE || actualParameter->dataType == FLOAT_TYPE )){
+        (actualParameter->dataType == INT_TYPE || actualParameter->dataType == FLOAT_TYPE )){
         printErrorMsgSpecial(actualParameter, formalParameter->type->properties.dataType, PASS_SCALAR_TO_ARRAY);
         actualParameter->dataType = ERROR_TYPE;
     }
@@ -605,7 +636,7 @@ void checkReturnStmt(AST_NODE* returnNode)
         if(returnType != VOID_TYPE)
             errorFlag = 1;
     else{
-        processExprRelatedNode(returnNode->child); 
+        processExprRelatedNode(returnNode->child, 0); 
         if(returnType != returnNode->child->dataType) // [Msg] 這邊是不是不管怎樣都應該要有 RETURN_TYPE_UNMATCH
             if (!((returnType == FLOAT_TYPE && returnNode->child->dataType == INT_TYPE) || (returnType == INT_TYPE && returnNode->child->dataType == FLOAT_TYPE)))
                 errorFlag = 1;
@@ -744,8 +775,8 @@ void processExprNode(AST_NODE* exprNode)
     if(exprNode->semantic_value.exprSemanticValue.kind == BINARY_OPERATION){
         AST_NODE *opL = exprNode->child;
         AST_NODE *opR = opL->rightSibling;
-        processExprRelatedNode(opL);
-        processExprRelatedNode(opR);
+        processExprRelatedNode(opL, 0);
+        processExprRelatedNode(opR, 0);
         if(opL->dataType == ERROR_TYPE || opR->dataType == ERROR_TYPE)
             exprNode->dataType = ERROR_TYPE;
         
@@ -761,7 +792,7 @@ void processExprNode(AST_NODE* exprNode)
     }
     else{ // [Inf] unary op
         AST_NODE* operand = exprNode->child;
-        processExprRelatedNode(operand);
+        processExprRelatedNode(operand, 0);
         
         if(operand->dataType == ERROR_TYPE)
             exprNode->dataType = ERROR_TYPE;
@@ -777,7 +808,7 @@ void processExprNode(AST_NODE* exprNode)
     }
 }
 
-void processExprRelatedNode(AST_NODE* exprRelatedNode)
+void processExprRelatedNode(AST_NODE* exprRelatedNode, int isInFunc)
 {
     // [msg] 看過了
     switch(exprRelatedNode->nodeType){
@@ -788,7 +819,7 @@ void processExprRelatedNode(AST_NODE* exprRelatedNode)
             checkFunctionCall(exprRelatedNode); 
             break;
         case IDENTIFIER_NODE:
-            processVariableRValue(exprRelatedNode); 
+            processVariableRValue(exprRelatedNode, isInFunc); 
             break;
         case CONST_VALUE_NODE:
             processConstValueNode(exprRelatedNode); 
@@ -813,49 +844,56 @@ void processVariableLValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高 /
    
     TypeDescriptor *varTypeDescr = IDSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;        
     if(IDSemanticValue.kind == NORMAL_ID){
-        idNode->dataType = varTypeDescr->properties.dataType;
+        if(varTypeDescr->kind == ARRAY_TYPE_DESCRIPTOR) {
+            printErrorMsg(idNode, NOT_ASSIGNABLE);
+            idNode->dataType = ERROR_TYPE;
+        } else { 
+            idNode->dataType = varTypeDescr->properties.dataType;
+        }
     }
     else if(IDSemanticValue.kind == ARRAY_ID){
         if(varTypeDescr->kind == SCALAR_TYPE_DESCRIPTOR){ // [Inf] e.g., int a; a[2][4] = 5;
             printErrorMsg(idNode, NOT_ARRAY);
             idNode->dataType = ERROR_TYPE;
-        }
-        int dimension = 0;
-        AST_NODE *dimPtr = idNode->child;
-        while(dimPtr){
-            dimension++;
-            processExprRelatedNode(dimPtr);
-            if(dimPtr->dataType == ERROR_TYPE)
-                idNode->dataType = ERROR_TYPE;
-            else if(dimPtr->dataType == FLOAT_TYPE){ // [Ass] 3.b)
-                printErrorMsg(idNode, ARRAY_SUBSCRIPT_NOT_INT);
+        } else {
+            int dimension = 0;
+            AST_NODE *dimPtr = idNode->child;
+            while(dimPtr){
+                dimension++;
+                processExprRelatedNode(dimPtr, 0);
+                if(dimPtr->dataType == ERROR_TYPE)
+                    idNode->dataType = ERROR_TYPE;
+                else if(dimPtr->dataType == FLOAT_TYPE){ // [Ass] 3.b)
+                    printErrorMsg(idNode, ARRAY_SUBSCRIPT_NOT_INT);
+                    idNode->dataType = ERROR_TYPE;
+                }
+                dimPtr = dimPtr->rightSibling;
+            }
+            // [Ass/Msg] implement checkpoint 3.a) here
+            //printf("[symbol] %s: ", idNode->semantic_value.identifierSemanticValue.identifierName);
+            int correctDims = entry->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
+            //printf("formal_dim = %d, ", correctDims);
+            //printf("received_dim = %d\n", dimension);
+            if (dimension < correctDims) {
+                printErrorMsg(idNode, NOT_ASSIGNABLE); // [Ass] 3.a)
                 idNode->dataType = ERROR_TYPE;
             }
-            dimPtr = dimPtr->rightSibling;
-        }
-        // [Ass/Msg] implement checkpoint 3.a) here
-        printf("[symbol] %s: ", idNode->semantic_value.identifierSemanticValue.identifierName);
-        int correctDims = entry->attribute->attr.typeDescriptor->properties.arrayProperties.dimension;
-        printf("formal_dim = %d, ", correctDims);
-        printf("received_dim = %d\n", dimension);
-        if (dimension < correctDims) {
-            printErrorMsg(idNode, NOT_ASSIGNABLE); // [Ass] 3.a)
-            idNode->dataType = ERROR_TYPE;
-        }
-        else if (dimension > correctDims) {
-            printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION); // [Ass] 3.a)
-            idNode->dataType = ERROR_TYPE;
-        }
-        else {
-            idNode->dataType = varTypeDescr->properties.arrayProperties.elementType;
+            else if (dimension > correctDims) {
+                printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION); // [Ass] 3.a)
+                idNode->dataType = ERROR_TYPE;
+            }
+            else {
+                idNode->dataType = varTypeDescr->properties.arrayProperties.elementType;
+            }
         }
     }
 }
 
-void processVariableRValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高 // [msg] 我大改過 加了 3.a)
+void processVariableRValue(AST_NODE* idNode, int isInFunc)// [Msg] 改很少 相似度極高 // [msg] 我大改過 加了 3.a)
 {   
     IdentifierSemanticValue IDSemanticValue = idNode->semantic_value.identifierSemanticValue;
     SymbolTableEntry *entry = retrieveSymbol(IDSemanticValue.identifierName);
+    //printf("[got ID on RHS] %s (line #%d).\n", IDSemanticValue.identifierName, idNode->linenumber);
     
     IDSemanticValue.symbolTableEntry = entry;
     if(!entry) {
@@ -868,28 +906,33 @@ void processVariableRValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高 /
         
     if(IDSemanticValue.kind == NORMAL_ID){ // [msg] pointer arithmetic 應該不用支援，算做 error？ (不過後面也沒)
         if(typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR) {
-            printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION_TOO_FEW);
-            idNode->dataType = ERROR_TYPE;
-            // if(typeDescriptor->properties.arrayProperties.elementType == INT_TYPE)
-            //     idNode->dataType = INT_PTR_TYPE;
-            // else
-            //     idNode->dataType = FLOAT_PTR_TYPE;
+            if (isInFunc) {
+                if(typeDescriptor->properties.arrayProperties.elementType == INT_TYPE)
+                    idNode->dataType = INT_PTR_TYPE;
+                else
+                    idNode->dataType = FLOAT_PTR_TYPE;
+            } else {
+                printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION_TOO_FEW);
+                idNode->dataType = ERROR_TYPE;
+            }
         }
         else {
             idNode->dataType = typeDescriptor->properties.dataType;
         }
     }
     else if(IDSemanticValue.kind == ARRAY_ID){
+        //printf("希望有 @ %d\n", idNode->linenumber);
         if(typeDescriptor->kind == SCALAR_TYPE_DESCRIPTOR){
             printErrorMsg(idNode, NOT_ARRAY);
             idNode->dataType = ERROR_TYPE;
         }
         else{
+            //printf("一定有 @ %d\n", idNode->linenumber);
             int dimension = 0;
             AST_NODE *dimPtr = idNode->child;
             while(dimPtr){
                 dimension++;
-                processExprRelatedNode(dimPtr);
+                processExprRelatedNode(dimPtr, 0);
                 if(dimPtr->dataType == ERROR_TYPE)
                     idNode->dataType = ERROR_TYPE;
                 else if(dimPtr->dataType == FLOAT_TYPE){
@@ -900,16 +943,30 @@ void processVariableRValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高 /
             }
             if(idNode->dataType != ERROR_TYPE){
                 int correctDims = typeDescriptor->properties.arrayProperties.dimension;
-                if (dimension < correctDims) {
-                    printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION_TOO_FEW); // [Ass] 3.a)
-                    idNode->dataType = ERROR_TYPE;
-                }
-                else if (dimension > correctDims) {
-                    printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION); // [Ass] 3.a)
-                    idNode->dataType = ERROR_TYPE;
-                }
-                else {
-                    idNode->dataType = typeDescriptor->properties.arrayProperties.elementType;
+                
+                if (isInFunc) {
+                    if(dimension == correctDims)
+                        idNode->dataType = typeDescriptor->properties.arrayProperties.elementType;
+                    else if(dimension > correctDims){
+                        printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION);
+                        idNode->dataType = ERROR_TYPE;
+                    }
+                    else if(typeDescriptor->properties.arrayProperties.elementType == INT_TYPE)
+                        idNode->dataType = INT_PTR_TYPE;
+                    else
+                        idNode->dataType = FLOAT_PTR_TYPE;
+                } else {          
+                    if (dimension < correctDims) {
+                        printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION_TOO_FEW); // [Ass] 3.a)
+                        idNode->dataType = ERROR_TYPE;
+                    }
+                    else if (dimension > correctDims) {
+                        printErrorMsg(idNode, INCOMPATIBLE_ARRAY_DIMENSION); // [Ass] 3.a)
+                        idNode->dataType = ERROR_TYPE;
+                    }
+                    else {
+                        idNode->dataType = typeDescriptor->properties.arrayProperties.elementType;
+                    }
                 }
             }
         }
@@ -928,6 +985,7 @@ void processConstValueNode(AST_NODE* constValueNode)
             constValueNode->dataType = FLOAT_TYPE;
             constValueNode->semantic_value.exprSemanticValue.constEvalValue.fValue =
                 constValueNode->semantic_value.const1->const_u.fval;
+            // printf("[got constant] %f.\n", constValueNode->semantic_value.const1->const_u.fval);
             break;
         case STRINGC:
             constValueNode->dataType = CONST_STRING_TYPE;
@@ -944,7 +1002,7 @@ void processBlockNode(AST_NODE* blockNode)
     openScope();
     AST_NODE *tmp = blockNode->child;
     while(tmp){
-        processGeneralNode(tmp);
+        processGeneralNode(tmp, 0);
         tmp = tmp->rightSibling;
     }
     closeScope();
@@ -977,7 +1035,7 @@ void processStmtNode(AST_NODE* stmtNode)
         }
 }
 
-void processGeneralNode(AST_NODE *node) // [Msg] 改很多 有可會crash
+void processGeneralNode(AST_NODE *node, int isInFunc) // [Msg] 改很多 有可會crash
 {
     AST_NODE *ptr = node->child;
     while(ptr){
@@ -992,7 +1050,7 @@ void processGeneralNode(AST_NODE *node) // [Msg] 改很多 有可會crash
                 checkAssignOrExpr(ptr);
                 break;
             case NONEMPTY_RELOP_EXPR_LIST_NODE:
-                processExprRelatedNode(ptr);
+                processExprRelatedNode(ptr, isInFunc);
                 break;
             case NUL_NODE:
                 break;
@@ -1019,7 +1077,8 @@ void processDeclDimList(AST_NODE* idNode, TypeDescriptor* typeDescriptor, int ig
         curDimNode = curDimNode->rightSibling;
     }
     while(curDimNode){
-        processExprRelatedNode(curDimNode);
+        processExprRelatedNode(curDimNode, 0);
+        //printf("[getting dimension] dimension_type: %d.\n", curDimNode->dataType);
         if(curDimNode->dataType == ERROR_TYPE)
             idNode->dataType = ERROR_TYPE;
         else if(curDimNode->dataType == FLOAT_TYPE){ // [Ass] 3.b)
@@ -1038,6 +1097,7 @@ void processDeclDimList(AST_NODE* idNode, TypeDescriptor* typeDescriptor, int ig
         dimension++;
         curDimNode = curDimNode->rightSibling;
     }
-
+    // printf("[got declared dimension] %d.\n", dimension);
     newArrayProperties.dimension = dimension;
+    typeDescriptor->properties.arrayProperties = newArrayProperties;
 }

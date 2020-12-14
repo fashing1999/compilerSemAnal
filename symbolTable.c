@@ -138,7 +138,7 @@ SymbolTableEntry* enterSymbol(char* symbolName, SymbolAttribute* attribute)
         if(!strcmp(tmp->name, symbolName)){
             if(tmp->nestingLevel == symbolTable.currentLevel){
                 int symbolDataType = attribute->attr.typeDescriptor->properties.dataType;
-                printf("error: redeclaration of \'%s %s\'\n", typeNameStrings[symbolDataType], symbolName);
+                // printf("error: redeclaration of \'%s %s\'\n", typeNameStrings[symbolDataType], symbolName);
                 free(newEntry);
                 return NULL;
             }
