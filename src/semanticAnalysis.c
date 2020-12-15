@@ -61,6 +61,7 @@ typedef enum ErrorMsgKind
     ARRAY_SIZE_NOT_INT,
     ARRAY_SIZE_NEGATIVE,
     ARRAY_SUBSCRIPT_NOT_INT,
+    ARRAY_SUBSCRIPT_NEGATIVE,
     PASS_ARRAY_TO_SCALAR,
     PASS_SCALAR_TO_ARRAY
 } ErrorMsgKind;
@@ -128,13 +129,16 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind)
             printf("too many arguments to function \'%s\'.\n", name);
             break;
         case ARRAY_SIZE_NOT_INT: // [Ass] 3.b)
-            printf("array subscript is not an integer\n");
+            printf("size of array \'%s\' is not an integer.\n", name);
             break;
         case ARRAY_SIZE_NEGATIVE: //[Ass] Extra 1
-            printf("size of array \'%s\' is negative.\n",name);
+            printf("size of array \'%s\' is negative.\n", name);
             break;
         case ARRAY_SUBSCRIPT_NOT_INT: //[Ass] 3.b)
             printf("array subscript is not an integer.\n");
+            break;
+        case ARRAY_SUBSCRIPT_NEGATIVE: //[Ass] Extra 1
+            printf("array subscript is negative.\n");
             break;
         case INCOMPATIBLE_ARRAY_DIMENSION_TOO_FEW: //[Ass] 3.a)
             printf("pointer references shouldn't appear in expressions.\n");
@@ -630,17 +634,18 @@ void checkReturnStmt(AST_NODE* returnNode)
     }
     else{
         processExprRelatedNode(returnNode->child, 0); 
-        if(returnType != returnNode->child->dataType)
-            if (!((returnType == FLOAT_TYPE && returnNode->child->dataType == INT_TYPE) || (returnType == INT_TYPE && returnNode->child->dataType == FLOAT_TYPE))){
-                errorFlag = 1;
-                printf("Warning found in line %d\n", returnNode->linenumber);
-                printf("no warning generated.\n\n");
-            }
+        if(returnType != returnNode->child->dataType){
             if(returnType == VOID_TYPE){
                 errorFlag = 1;
                 printf("Warning found in line %d\n", returnNode->linenumber);
                 printf("\'return\' with a value, in function returning \'void\'\n\n");
             }
+            else if (!((returnType == FLOAT_TYPE && returnNode->child->dataType == INT_TYPE) || (returnType == INT_TYPE && returnNode->child->dataType == FLOAT_TYPE))){
+                errorFlag = 1;
+                printf("Warning found in line %d\n", returnNode->linenumber);
+                printf("no warning generated.\n\n");
+            }
+        }
     }
 
     if(errorFlag)
@@ -675,17 +680,15 @@ void getExprOrConstValue(AST_NODE* exprOrConstNode, int* iValue, float* fValue)
     }
 }
 
-void evaluateExprValue(AST_NODE* exprNode)
-// [inf] 避免傳 NULL ptr 給 getExprOrConstValue() 以免出事
+void evaluateExprValue(AST_NODE* exprNode) // [inf] 避免傳 NULL ptr 給 getExprOrConstValue() 以免出事
 {
     if(exprNode->semantic_value.exprSemanticValue.kind == BINARY_OPERATION){
         AST_NODE *opL = exprNode->child;
         AST_NODE *opR = opL->rightSibling;
         if(opL->dataType == INT_TYPE && opR->dataType == INT_TYPE){
             int valL = 0, valR = 0, result;
-            float fvalL, fvalR;
-            getExprOrConstValue(opL, &valL, &fvalL);
-            getExprOrConstValue(opR, &valR, &fvalR);
+            getExprOrConstValue(opL, &valL, NULL);
+            getExprOrConstValue(opR, &valR, NULL);
             exprNode->dataType = INT_TYPE;
             switch(exprNode->semantic_value.exprSemanticValue.op.binaryOp){
                 case BINARY_OP_ADD: result = valL + valR;  break;
@@ -704,14 +707,15 @@ void evaluateExprValue(AST_NODE* exprNode)
                     printf("[DEBUG] Unhandled case in evaluateExprValue()\n");
                     break;
             }
+            //printf("[evalExprVal] int L = %d; R = %d; result = %d\n", valL, valR, result);
             exprNode->semantic_value.exprSemanticValue.constEvalValue.iValue = result;
+            return;
         }
         else
         {
             float fvalL = 0, fvalR = 0, result;
-            int valL, valR;
-            getExprOrConstValue(opL, &valL, &fvalL);
-            getExprOrConstValue(opR, &valR, &fvalR);
+            getExprOrConstValue(opL, NULL, &fvalL);
+            getExprOrConstValue(opR, NULL, &fvalR);
             exprNode->dataType = FLOAT_TYPE;
             switch(exprNode->semantic_value.exprSemanticValue.op.binaryOp){
                 case BINARY_OP_ADD: result = fvalL + fvalR;  break;
@@ -731,14 +735,14 @@ void evaluateExprValue(AST_NODE* exprNode)
                     break;
             }
             exprNode->semantic_value.exprSemanticValue.constEvalValue.fValue = result;
+            return;
         }
     }
     else{
         AST_NODE* operand = exprNode->child;
         if(operand->dataType == INT_TYPE){
             int result = 0;
-            float fholder;
-            getExprOrConstValue(operand, &result, &fholder);
+            getExprOrConstValue(operand, &result, NULL);
             exprNode->dataType = INT_TYPE;
             switch(exprNode->semantic_value.exprSemanticValue.op.unaryOp){
                 case UNARY_OP_POSITIVE: break;
@@ -748,13 +752,14 @@ void evaluateExprValue(AST_NODE* exprNode)
                     printf("[DEBUG] Unhandled case in evaluateExprValue()\n");
                     break;
             }
+            //printf("[evalExprVal] result = %d\n", result);
             exprNode->semantic_value.exprSemanticValue.constEvalValue.iValue = result;
+            return;
         }
         else
         {
             float result = 0;
-            int iholder;
-            getExprOrConstValue(operand, &iholder, &result);
+            getExprOrConstValue(operand, NULL, &result);
             exprNode->dataType = FLOAT_TYPE;
             switch(exprNode->semantic_value.exprSemanticValue.op.unaryOp){
                 case UNARY_OP_POSITIVE: break;
@@ -765,6 +770,7 @@ void evaluateExprValue(AST_NODE* exprNode)
                     break;
             }
             exprNode->semantic_value.exprSemanticValue.constEvalValue.fValue = result;
+            return;
         }
     }
 }
@@ -865,6 +871,12 @@ void processVariableLValue(AST_NODE* idNode)
                     printErrorMsg(idNode, ARRAY_SUBSCRIPT_NOT_INT);
                     idNode->dataType = ERROR_TYPE;
                 }
+                else if(dimPtr->semantic_value.exprSemanticValue.constEvalValue.iValue < 0
+                || dimPtr->semantic_value.exprSemanticValue.isConstEval < 0){ // [Ass] Extra 1
+                    printErrorMsg(idNode, ARRAY_SUBSCRIPT_NEGATIVE);//[tag]
+                    idNode->dataType = ERROR_TYPE;
+                }
+                
                 dimPtr = dimPtr->rightSibling;
             }
             // [Ass/Msg] implement checkpoint 3.a) here
@@ -931,12 +943,18 @@ void processVariableRValue(AST_NODE* idNode, int isInFunc)
             while(dimPtr){
                 dimension++;
                 processExprRelatedNode(dimPtr, 0);
+                //printf("[dim iValue] = %12d [dim fValue] = %f\n",
+                // dimPtr->semantic_value.exprSemanticValue.constEvalValue.iValue, dimPtr->semantic_value.exprSemanticValue.constEvalValue.fValue);
                 if(dimPtr->dataType == ERROR_TYPE)
                     idNode->dataType = ERROR_TYPE;
                 else if(dimPtr->dataType == FLOAT_TYPE){
                     printErrorMsg(idNode, ARRAY_SUBSCRIPT_NOT_INT);
                     idNode->dataType = ERROR_TYPE;
                 }
+                else if(dimPtr->semantic_value.exprSemanticValue.constEvalValue.iValue < 0){ // [Ass] Extra 1
+                    printErrorMsg(idNode, ARRAY_SUBSCRIPT_NEGATIVE);
+                    idNode->dataType = ERROR_TYPE;
+                }                
                 dimPtr = dimPtr->rightSibling;
             }
             if(idNode->dataType != ERROR_TYPE){
@@ -975,6 +993,7 @@ void processConstValueNode(AST_NODE* constValueNode)
 {
     switch(constValueNode->semantic_value.const1->const_type){
         case INTEGERC:
+            //printf("[in processConVal] intval = %d\n", constValueNode->semantic_value.const1->const_u.intval);
             constValueNode->dataType = INT_TYPE;
             constValueNode->semantic_value.exprSemanticValue.constEvalValue.iValue =
                 constValueNode->semantic_value.const1->const_u.intval;

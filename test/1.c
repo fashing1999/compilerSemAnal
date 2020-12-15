@@ -38,15 +38,20 @@ int plusOnes(int a[10]){
 int plusOne(int a){
     return a+1;
 }
+
 int main(){
-    goodgood haha[3];
     float c = 0, s[10][10];
-    int i, n = 10;
+    int i, n = 10; 
     int b = 3;
     int i = 100;
     int s[33][33];
     int x = s[3] + 7 - 2.2;
     int y = s[1.27][4] + 888;
+    goodgood haha[3];
+
+    c = s[1][2-3];
+    c = s[2][-3];
+    i = n(1);
 
     plusOne(s);
     plusOnes(i);
