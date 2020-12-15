@@ -84,7 +84,7 @@ char* typeNameString(int n){
     }
 }
 
-void printErrorMsgSpecial(AST_NODE* node1, DATA_TYPE type2, ErrorMsgKind errorMsgKind) // [Msg] 應該沒錯吧
+void printErrorMsgSpecial(AST_NODE* node1, DATA_TYPE type2, ErrorMsgKind errorMsgKind)
 {
     g_anyErrorOccur = 1;
     printf("Error found in line %d\n", node1->linenumber);
@@ -100,14 +100,14 @@ void printErrorMsgSpecial(AST_NODE* node1, DATA_TYPE type2, ErrorMsgKind errorMs
     printf("\n");
 }
 
-void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) // [Msg] del(n) := "如果不用留的話，有n個地方要刪掉"
+void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) 
 {
     g_anyErrorOccur = 1;
     printf("Error found in line %d\n", node->linenumber);
     char* name = node->semantic_value.identifierSemanticValue.identifierName;
     switch(errorMsgKind){
-        case SYMBOL_IS_NOT_TYPE: // [Msg] 補足reserved word當成id的部分，例：a a = 5;。但是好像不可能會有，可能可以刪掉
-            printf("ID \'%s\' is not a type name.\n",
+        case SYMBOL_IS_NOT_TYPE: // [Inf] 補足reserved word當成id的部分
+            printf("unknown type name \'%s\'.\n",
                 node->semantic_value.identifierSemanticValue.identifierName);
             break;
         case SYMBOL_REDECLARE: //[Ass] 1.b)         
@@ -121,18 +121,11 @@ void printErrorMsg(AST_NODE* node, ErrorMsgKind errorMsgKind) // [Msg] del(n) :=
         case NOT_FUNCTION_NAME: //[Ass] Extra 2
             printf("called object \'%s\' is not a function or function pointer.\n", name);
             break;
-        case TRY_TO_INIT_ARRAY: // [Msg] del(1), reference: [Msg] 不行喔?
-            printf("Cannot initialize array \'%s\'.\n",
-                node->semantic_value.identifierSemanticValue.identifierName);
-            break;
         case TOO_FEW_ARGUMENTS: //[Ass] 2.a)
             printf("too few arguments to function \'%s\'.\n", name);
             break;
         case TOO_MANY_ARGUMENTS: //[Ass] 2.a)
             printf("too many arguments to function \'%s\'.\n", name);
-            break;
-        case RETURN_TYPE_UNMATCH: // [Ass] 2.b) [Msg] 但是gcc好像允許這個功能!!?
-            printf("no warning generated.\n");
             break;
         case ARRAY_SIZE_NOT_INT: // [Ass] 3.b)
             printf("array subscript is not an integer\n");
@@ -242,7 +235,7 @@ void processTypeNode(AST_NODE* idNodeAsType)
     }
 }
 
-void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTypeAttribute, int ignoreArrayFirstDimSize) // [Msg] 改很少 相似度極高
+void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTypeAttribute, int ignoreArrayFirstDimSize)
 {
     AST_NODE* typeNode = declarationNode->child;
     TypeDescriptor *typeNodeTypeDescr = typeNode->semantic_value.identifierSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
@@ -302,8 +295,7 @@ void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTy
                     if (assignExpr->dataType == ERROR_TYPE) {
                         IDNode->dataType = ERROR_TYPE;
                         declarationNode->dataType = ERROR_TYPE;
-                    }
-                    
+                    }                  
                     break;
                 default:
                     printf("[DEBUG] Unhandled case in declareIdList()\n");
@@ -325,9 +317,10 @@ void declareIdList(AST_NODE* declarationNode, SymbolAttributeKind isVariableOrTy
     }
 }
 
-void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住了 (ans: 有看過了)
+void declareFunction(AST_NODE* declarationNode)
 {
     AST_NODE* returnTypeNode = declarationNode->child;
+
     AST_NODE* functionNameID = returnTypeNode->rightSibling;
     int errorFlag = 0;
     
@@ -343,7 +336,9 @@ void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住�
     functionAttribute->attr.functionSignature->returnType = returnTypeNode->dataType;
     functionAttribute->attr.functionSignature->parameterList = NULL;
 
-    if(!errorFlag) // [msg] removed "symbol table entry inserted" flag
+    // printf("[func type name] %s\n", returnTypeNode->semantic_value.identifierSemanticValue.identifierName);
+
+    if(!errorFlag)
         enterSymbol(functionNameID->semantic_value.identifierSemanticValue.identifierName, functionAttribute);
     
     openScope();
@@ -387,7 +382,7 @@ void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住�
     }
     functionAttribute->attr.functionSignature->parametersCount = parametersCount;
 
-    if (errorFlag){ // [msg] deleted condition: && (functionAttribute != NULL)
+    if (errorFlag){
         Parameter* curParameterPtr = functionAttribute->attr.functionSignature->parameterList;
         Parameter* nextParameterPtr = NULL; 
         while(curParameterPtr){
@@ -398,40 +393,27 @@ void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住�
         free(functionAttribute->attr.functionSignature);
         free(functionAttribute);
 
-        // [msg] moved error reporting and symbol table entry deletion to here
         removeSymbol(functionNameID->semantic_value.identifierSemanticValue.identifierName);
         declarationNode->dataType = ERROR_TYPE;
     } 
     else{ // [inf] process function contents
         AST_NODE *blockNode = parameterListNode->rightSibling;
         AST_NODE *curBlockContent = blockNode->child;
-        int checkReturn = 0; //0 for no return; 1 for having something returned
+        int prevContentLine;
+        int checkReturn = 0; // 0 for no return; 1 for having something returned
         while(curBlockContent){
+            prevContentLine = curBlockContent->linenumber;
+            // printf("[func statement] in line %d\n", curBlockContent->linenumber);
             processGeneralNode(curBlockContent, 0);
-            if(curBlockContent->child->semantic_value.stmtSemanticValue.kind == RETURN_STMT){
+            if(curBlockContent->child->semantic_value.stmtSemanticValue.kind == RETURN_STMT)
                 checkReturn = 1;
-                AST_NODE *tmp = curBlockContent->child->child;
-                while(tmp)
-                {
-                    printf("%d ", tmp->semantic_value.stmtSemanticValue.kind);
-                    tmp = tmp->rightSibling;
-                }
-                printf("\n");
-                // if(curBlockContent->dataType != returnTypeNode->dataType){
-                //     printf("Warnig found in line %d\n", curBlockContent->linenumber);
-                //     if(returnTypeNode->dataType == VOID_TYPE)
-                //         printf("\'return\' with a value, in function returning void\n\n");
-                //     else
-                //         printf("return makes \'%s\' from [%d] without a casting\n\n", 
-                //         typeNameString(returnTypeNode->dataType), curBlockContent->child->child->child->rightSibling->dataType);
-                // }
-            }
-            
+            // printf("[func return check] %d\n", checkReturn);
             curBlockContent = curBlockContent->rightSibling;
         }
-        // if(!checkReturn && returnTypeNode->dataType != VOID_TYPE){
-        //     //[Msg]好像連warning都不是
-        // }
+        if(!checkReturn && returnTypeNode->dataType != VOID_TYPE){
+            printf("Warning found in line %d\n", prevContentLine);
+            printf("\'return\' with no value, in function returning \'%s\'\n\n", typeNameString(returnTypeNode->dataType));
+        }
     }
 
     closeScope();
@@ -440,7 +422,6 @@ void declareFunction(AST_NODE* declarationNode) // [Msg] 還沒改 腦袋卡住�
 /*****************************************************************************************************/
 void checkIfStmt(AST_NODE* ifNode)
 {   
-    // [msg] 已看過
     AST_NODE* checkExpr = ifNode->child;
     checkAssignOrExpr(checkExpr);
     AST_NODE* blockNode = checkExpr->rightSibling;
@@ -451,7 +432,6 @@ void checkIfStmt(AST_NODE* ifNode)
 
 void checkWhileStmt(AST_NODE* whileNode)
 {
-    // [msg] 已看過
     AST_NODE* checkExpr = whileNode->child;
     checkAssignOrExpr(checkExpr);
     AST_NODE* blockNode = checkExpr->rightSibling;
@@ -460,7 +440,6 @@ void checkWhileStmt(AST_NODE* whileNode)
 
 void checkForStmt(AST_NODE* forNode)
 {
-    // [msg] 已看過
     AST_NODE* initExpr = forNode->child;
     processGeneralNode(initExpr, 0);
     AST_NODE* checkExpr = initExpr->rightSibling;
@@ -473,7 +452,6 @@ void checkForStmt(AST_NODE* forNode)
 
 void checkAssignOrExpr(AST_NODE* assignOrExprRelatedNode)
 {
-    // [msg] 已看過
     if(assignOrExprRelatedNode->nodeType == STMT_NODE) {
         switch (assignOrExprRelatedNode->semantic_value.stmtSemanticValue.kind)
         {
@@ -498,7 +476,6 @@ void checkAssignmentStmt(AST_NODE* assignmentNode)
     if(opL->dataType == ERROR_TYPE || opR->dataType == ERROR_TYPE)
         assignmentNode->dataType = ERROR_TYPE;
     
-    // [msg] type conversion 可以先不用做？
     assignmentNode->dataType = getBiggerType(opL->dataType, opR->dataType);
 }
 
@@ -533,9 +510,9 @@ void checkWriteFunction(AST_NODE* functionCallNode) // [Inf] just for write()
 void checkReadFunction(AST_NODE* functionCallNode) {
     AST_NODE* funcIDNode = functionCallNode->child;
     AST_NODE* paraList = funcIDNode->rightSibling;
-    AST_NODE* paraPtr = paraList->child;
+    // AST_NODE* paraPtr = paraList->child;
 
-    if (paraPtr->nodeType != NUL_NODE) {
+    if (paraList->nodeType != NUL_NODE) {
         printErrorMsg(funcIDNode, TOO_MANY_ARGUMENTS);
         functionCallNode->dataType = ERROR_TYPE;
     } else {
@@ -616,7 +593,6 @@ void checkParameterPassing(Parameter* formalParameter, AST_NODE* actualParameter
         printErrorMsgSpecial(actualParameter, formalParameter->type->properties.dataType, PASS_ARRAY_TO_SCALAR);
         actualParameter->dataType = ERROR_TYPE;
     }
-    // [msg] 這邊你原本照上面那條 (***_PTR_TYPE) 應該錯了
     else if(formalParameter->type->kind == ARRAY_TYPE_DESCRIPTOR && 
         (actualParameter->dataType == INT_TYPE || actualParameter->dataType == FLOAT_TYPE )){
         printErrorMsgSpecial(actualParameter, formalParameter->type->properties.dataType, PASS_SCALAR_TO_ARRAY);
@@ -633,28 +609,42 @@ void checkReturnStmt(AST_NODE* returnNode)
     AST_NODE* parentNode = returnNode->parent;
     DATA_TYPE returnType = NONE_TYPE;
     while(parentNode){
-        if(parentNode->nodeType == DECLARATION_NODE)
-            if(parentNode->semantic_value.declSemanticValue.kind == FUNCTION_DECL)
+        if(parentNode->nodeType == DECLARATION_NODE) {
+            if(parentNode->semantic_value.declSemanticValue.kind == FUNCTION_DECL) {
+                // printf("hihihihi\n");
                 returnType = parentNode->child->dataType;
-            break;
+                break;
+            }
+        }
         parentNode = parentNode->parent;
     }
 
+    // printf("[function type] %d\n", returnType);
     int errorFlag = 0;
-    if(returnNode->child->nodeType == NUL_NODE) //[Inf] return;
-        if(returnType != VOID_TYPE)
+    if(returnNode->child->nodeType == NUL_NODE){ //[Inf] return;
+        if(returnType != VOID_TYPE){
             errorFlag = 1;
+            printf("Warning found in line %d\n", returnNode->linenumber);
+            printf("\'return\' with no value, in function returning \'%s\'\n\n", typeNameString(returnType));
+        }
+    }
     else{
         processExprRelatedNode(returnNode->child, 0); 
-        if(returnType != returnNode->child->dataType) // [Msg] 這邊是不是不管怎樣都應該要有 RETURN_TYPE_UNMATCH
-            if (!((returnType == FLOAT_TYPE && returnNode->child->dataType == INT_TYPE) || (returnType == INT_TYPE && returnNode->child->dataType == FLOAT_TYPE)))
+        if(returnType != returnNode->child->dataType)
+            if (!((returnType == FLOAT_TYPE && returnNode->child->dataType == INT_TYPE) || (returnType == INT_TYPE && returnNode->child->dataType == FLOAT_TYPE))){
                 errorFlag = 1;
+                printf("Warning found in line %d\n", returnNode->linenumber);
+                printf("no warning generated.\n\n");
+            }
+            if(returnType == VOID_TYPE){
+                errorFlag = 1;
+                printf("Warning found in line %d\n", returnNode->linenumber);
+                printf("\'return\' with a value, in function returning \'void\'\n\n");
+            }
     }
 
-    if(errorFlag){
-        printErrorMsg(returnNode, RETURN_TYPE_UNMATCH);
+    if(errorFlag)
         returnNode->dataType = ERROR_TYPE;
-    }
     else
         returnNode->dataType = returnType;
 }
@@ -686,7 +676,7 @@ void getExprOrConstValue(AST_NODE* exprOrConstNode, int* iValue, float* fValue)
 }
 
 void evaluateExprValue(AST_NODE* exprNode)
-// [msg] 這邊多改了：避免傳 NULL ptr 給 getExprOrConstValue() 以免出事
+// [inf] 避免傳 NULL ptr 給 getExprOrConstValue() 以免出事
 {
     if(exprNode->semantic_value.exprSemanticValue.kind == BINARY_OPERATION){
         AST_NODE *opL = exprNode->child;
@@ -819,19 +809,18 @@ void processExprNode(AST_NODE* exprNode)
 
 void processExprRelatedNode(AST_NODE* exprRelatedNode, int isInFunc)
 {
-    // [msg] 看過了
     switch(exprRelatedNode->nodeType){
-        case EXPR_NODE:
-            processExprNode(exprRelatedNode); 
-            break;
-        case STMT_NODE:
-            checkFunctionCall(exprRelatedNode); 
-            break;
         case IDENTIFIER_NODE:
             processVariableRValue(exprRelatedNode, isInFunc); 
             break;
         case CONST_VALUE_NODE:
             processConstValueNode(exprRelatedNode); 
+            break;
+        case EXPR_NODE:
+            processExprNode(exprRelatedNode); 
+            break;
+        case STMT_NODE:
+            checkFunctionCall(exprRelatedNode); 
             break;
         default:
             printf("[DEBUG] Unhandle case in processExprRelatedNode()\n");
@@ -839,7 +828,7 @@ void processExprRelatedNode(AST_NODE* exprRelatedNode, int isInFunc)
     }
 }
 
-void processVariableLValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高 // [msg] 我大改過 加了 3.a)
+void processVariableLValue(AST_NODE* idNode)
 {
     IdentifierSemanticValue IDSemanticValue = idNode->semantic_value.identifierSemanticValue;
     // printf("%s\n", idNode->semantic_value.identifierSemanticValue.identifierName);
@@ -898,7 +887,7 @@ void processVariableLValue(AST_NODE* idNode)// [Msg] 改很少 相似度極高 /
     }
 }
 
-void processVariableRValue(AST_NODE* idNode, int isInFunc)// [Msg] 改很少 相似度極高 // [msg] 我大改過 加了 3.a)
+void processVariableRValue(AST_NODE* idNode, int isInFunc)
 {   
     IdentifierSemanticValue IDSemanticValue = idNode->semantic_value.identifierSemanticValue;
     SymbolTableEntry *entry = retrieveSymbol(IDSemanticValue.identifierName);
@@ -913,7 +902,7 @@ void processVariableRValue(AST_NODE* idNode, int isInFunc)// [Msg] 改很少 相
 
     TypeDescriptor *typeDescriptor = IDSemanticValue.symbolTableEntry->attribute->attr.typeDescriptor;
         
-    if(IDSemanticValue.kind == NORMAL_ID){ // [msg] pointer arithmetic 應該不用支援，算做 error？ (不過後面也沒)
+    if(IDSemanticValue.kind == NORMAL_ID){
         if(typeDescriptor->kind == ARRAY_TYPE_DESCRIPTOR) {
             if (isInFunc) {
                 if(typeDescriptor->properties.arrayProperties.elementType == INT_TYPE)
@@ -1044,7 +1033,7 @@ void processStmtNode(AST_NODE* stmtNode)
         }
 }
 
-void processGeneralNode(AST_NODE *node, int isInFunc) // [Msg] 改很多 有可會crash
+void processGeneralNode(AST_NODE *node, int isInFunc)
 {
     AST_NODE *ptr = node->child;
     while(ptr){

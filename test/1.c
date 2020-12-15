@@ -3,8 +3,34 @@ float b;
 
 typedef int goodgood[5][5];
 
-void testtt(){
+void testFunc1(){
     return 1;
+}
+int testFunc2(){
+    return;
+}
+int testFunc3(){
+    int a = 0;
+    while(a<10){
+        a = a + 1;
+    }
+    read();
+    fread();
+    read(222);
+    fread(237, 938429384249283);
+    write(1.44);
+    write(1, 4, 7);
+    write();
+    write("111222");
+}
+int testFunc4(){
+    ask a = 77;
+    float pi = 3.1416;
+    return pi;
+}
+int testFunc5(){
+    int a[10][10];
+    return a;
 }
 int plusOnes(int a[10]){
     return a[5]+1;

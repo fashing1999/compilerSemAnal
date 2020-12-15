@@ -4,10 +4,6 @@
 #include <stdio.h>
 // This file is for reference only, you are not required to follow the implementation. //
 
-char typeNameStrings[8][16] = {
-    'int', 'float', 'void', 'int *', 'float *', 'char *', 'unnamed', 'unnamed'
-};
-
 int HASH(char * str) {
 	int idx=0;
 	while (*str){
@@ -136,20 +132,14 @@ SymbolTableEntry* enterSymbol(char* symbolName, SymbolAttribute* attribute)
     SymbolTableEntry* tmp = symbolTable.hashTable[hashIndex];
     while(tmp){
         if(!strcmp(tmp->name, symbolName)){
-            if(tmp->nestingLevel == symbolTable.currentLevel){
-                int symbolDataType = attribute->attr.typeDescriptor->properties.dataType;
-                // printf("error: redeclaration of \'%s %s\'\n", typeNameStrings[symbolDataType], symbolName);
-                free(newEntry);
-                return NULL;
-            }
-            else{ //different level -> make branch
-                removeFromHashTrain(hashIndex, tmp);
-                newEntry->sameNameInOuterLevel = tmp;
-                break;
-            }
+            //different level -> make branch
+            removeFromHashTrain(hashIndex, tmp);
+            newEntry->sameNameInOuterLevel = tmp;
+            break;
         }
-        else
+        else {
             tmp = tmp->nextInHashChain;
+        }
     }
 
     enterIntoHashTrain(hashIndex, newEntry);
